@@ -193,8 +193,12 @@ if uploaded_files:
                 ]
 
                 # Apply exclude_did_not_attend filter BEFORE creating weekly and monthly aggregations
+                dna_count_before = len(filtered_df)
                 if exclude_did_not_attend:
                     filtered_df = filtered_df[filtered_df['appointment_status'] != 'Did Not Attend']
+                    dna_count_excluded = dna_count_before - len(filtered_df)
+                    dna_percentage = (dna_count_excluded / dna_count_before) * 100
+                    st.success(f"✓ Excluded {dna_count_excluded} 'Did Not Attend' appointments ({dna_percentage:.1f}% of total)")
 
                 # Determine if ARRS should be applied based on filtered end date (needed for chart annotations)
                 filtered_end_date = filtered_df['appointment_date'].max().date()
@@ -298,7 +302,7 @@ if uploaded_files:
                     fig_weekly.add_vline(
                         x=pd.Timestamp(arrs_end_date),
                         line_dash='dash',
-                        line_color='blue'
+                        line_color='#749857'
                     )
                     fig_weekly.add_annotation(
                         x=pd.Timestamp(arrs_end_date),
@@ -356,7 +360,7 @@ if uploaded_files:
                     fig_monthly.add_vline(
                         x=pd.Timestamp(arrs_end_date),
                         line_dash='dash',
-                        line_color='blue'
+                        line_color='#749857'
                     )
                     fig_monthly.add_annotation(
                         x=pd.Timestamp(arrs_end_date),
@@ -427,6 +431,8 @@ if uploaded_files:
                 end_date = filtered_df['appointment_date'].max().strftime('%d %b %y')
                 with col1:
                     st.metric("Total Surgery Appointments", len(filtered_df))
+                    if exclude_did_not_attend:
+                        st.badge("Excluding 'Did Not Attend'", color='green')
                 with col2:
                     if should_apply_arrs:
                         if arrs_future:
