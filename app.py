@@ -2,10 +2,11 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import io
+from datetime import date
 
-st.set_page_config(page_title="CSV File Merger", layout="wide")
+st.set_page_config(page_title="Access ES Tracker", layout="wide", page_icon=':material/child_hat:')
 
-st.title("CSV File Merger")
+st.title("Access ES Tracker")
 st.markdown("Upload multiple CSV files to merge them into a single dataframe")
 
 # Sidebar for file uploads
@@ -36,20 +37,45 @@ with st.sidebar:
 
     st.divider()
 
-    st.header("ARRS Figures (25/26)")
-    arrs_apr_25 = st.number_input("Apr 25", min_value=0, value=0, step=1)
-    arrs_may_25 = st.number_input("May 25", min_value=0, value=0, step=1)
-    arrs_jun_25 = st.number_input("Jun 25", min_value=0, value=0, step=1)
-    arrs_jul_25 = st.number_input("Jul 25", min_value=0, value=0, step=1)
-    arrs_aug_25 = st.number_input("Aug 25", min_value=0, value=0, step=1)
-    arrs_sep_25 = st.number_input("Sep 25", min_value=0, value=0, step=1)
-    arrs_oct_25 = st.number_input("Oct 25", min_value=0, value=0, step=1)
-    arrs_nov_25 = st.number_input("Nov 25", min_value=0, value=0, step=1)
-    arrs_dec_25 = st.number_input("Dec 25", min_value=0, value=0, step=1)
-    arrs_jan_26 = st.number_input("Jan 26", min_value=0, value=0, step=1)
-    arrs_feb_26 = st.number_input("Feb 26", min_value=0, value=0, step=1)
-    arrs_mar_26 = st.number_input("Mar 26", min_value=0, value=0, step=1)
+    st.header("ARRS 25/26")
+    arrs_2526 = st.number_input("Total ARRS to date.", min_value=0, value=0, step=1)
 
+    # Map month selections to end of month dates
+    arrs_month_map = {
+        "April 25": date(2025, 4, 30),
+        "May 25": date(2025, 5, 31),
+        "June 25": date(2025, 6, 30),
+        "July 25": date(2025, 7, 31),
+        "August 25": date(2025, 8, 31),
+        "September 25": date(2025, 9, 30),
+        "October 25": date(2025, 10, 31),
+        "November 25": date(2025, 11, 30),
+        "December 25": date(2025, 12, 31),
+        "January 26": date(2026, 1, 31),
+        "February 26": date(2026, 2, 28),
+        "March 26": date(2026, 3, 31)
+    }
+
+    if arrs_2526 == 0:
+        st.badge(f"Enter ICB ARRS total value to date", color='red')
+        arrs_future = False
+        arrs_month = "April 25"
+        arrs_end_date = arrs_month_map[arrs_month]
+    else:
+        arrs_month = st.selectbox("Select month for ARRS input", options=[
+            "April 25", "May 25", "June 25", "July 25", "August 25", "September 25", "October 25", "November 25", "December 25", "January 26", "February 26", "March 26"], index=0, help="Select the month corresponding to the ARRS input.")
+
+        arrs_end_date = arrs_month_map[arrs_month]
+        arrs_start_date = date(2025, 4, 1)
+        arrs_weeks_span = (arrs_end_date - arrs_start_date).days / 7
+
+        arrs_future = st.checkbox('Estimate Future ARRS?', value=False, help="Estimate future ARRS based on current weekly rate")
+        if arrs_future:
+            estimated_weekly_arrs = arrs_2526 / arrs_weeks_span
+            st.info(f"Future ARRS estimation at **{estimated_weekly_arrs:.0f}** ARRS apps per week - {arrs_weeks_span:.1f} weeks to {arrs_month}.")
+        else:
+            st.error(f":material/warning: Move your date slider to the **last day of {arrs_month}**")
+            st.error(f":material/warning: ARRS **will not be applied** to future months! Your Average Apps per 1000 per week will be underestimated.")
     st.divider()
 
     show_dataframe = st.checkbox(
@@ -82,10 +108,19 @@ if uploaded_files:
 
         # Convert appointment_date column to datetime if it exists
         if 'appointment_date' in combined_df.columns:
-            combined_df['appointment_date'] = pd.to_datetime(
-                combined_df['appointment_date'],
-                format='%d-%b-%y'
-            )
+            try:
+                # Try the expected format first
+                combined_df['appointment_date'] = pd.to_datetime(
+                    combined_df['appointment_date'],
+                    format='%d-%b-%y'
+                )
+            except ValueError:
+                # If that fails, try auto-detection
+                combined_df['appointment_date'] = pd.to_datetime(
+                    combined_df['appointment_date'],
+                    format='mixed',
+                    dayfirst=False
+                )
 
         # Scatter plot section
         st.subheader("Filters and Visualization")
@@ -160,6 +195,10 @@ if uploaded_files:
                 # Apply exclude_did_not_attend filter BEFORE creating weekly and monthly aggregations
                 if exclude_did_not_attend:
                     filtered_df = filtered_df[filtered_df['appointment_status'] != 'Did Not Attend']
+
+                # Determine if ARRS should be applied based on filtered end date (needed for chart annotations)
+                filtered_end_date = filtered_df['appointment_date'].max().date()
+                should_apply_arrs = filtered_end_date >= arrs_end_date and arrs_2526 > 0
 
                 # Create weekly aggregation for all appointments in filtered dataframe
                 weekly_df = filtered_df.copy()
@@ -254,6 +293,32 @@ if uploaded_files:
                     annotation_position='right'
                 )
 
+                # Add ARRS end date vertical line if applicable
+                if should_apply_arrs:
+                    fig_weekly.add_vline(
+                        x=pd.Timestamp(arrs_end_date),
+                        line_dash='dash',
+                        line_color='blue'
+                    )
+                    fig_weekly.add_annotation(
+                        x=pd.Timestamp(arrs_end_date),
+                        text='ARRS End Date',
+                        showarrow=False,
+                        xanchor='left',
+                        yanchor='top'
+                    )
+
+                # Add estimated ARRS indicator if applicable
+                if arrs_future and should_apply_arrs:
+                    # Add yellow horizontal band showing estimated weekly ARRS rate
+                    fig_weekly.add_hline(
+                        y=estimated_weekly_arrs,
+                        line_dash='dash',
+                        line_color='orange',
+                        annotation_text=f'Est. Weekly ARRS ({estimated_weekly_arrs:.0f})',
+                        annotation_position='right'
+                    )
+
                 fig_weekly.update_layout(
                     xaxis_title="Week Starting Date",
                     yaxis_title="Total Appointments",
@@ -286,6 +351,32 @@ if uploaded_files:
                     markers=True
                 )
 
+                # Add ARRS end date vertical line if applicable
+                if should_apply_arrs:
+                    fig_monthly.add_vline(
+                        x=pd.Timestamp(arrs_end_date),
+                        line_dash='dash',
+                        line_color='blue'
+                    )
+                    fig_monthly.add_annotation(
+                        x=pd.Timestamp(arrs_end_date),
+                        text='ARRS End Date',
+                        showarrow=False,
+                        xanchor='left',
+                        yanchor='top'
+                    )
+
+                # Add estimated ARRS indicator if applicable
+                if arrs_future and should_apply_arrs:
+                    # Add yellow horizontal band showing estimated weekly ARRS rate
+                    fig_monthly.add_hline(
+                        y=estimated_weekly_arrs,
+                        line_dash='dash',
+                        line_color='orange',
+                        annotation_text=f'Est. Weekly ARRS ({estimated_weekly_arrs:.0f})',
+                        annotation_position='right'
+                    )
+
                 fig_monthly.update_layout(
                     xaxis_title="Month",
                     yaxis_title="Total Appointments",
@@ -313,21 +404,68 @@ if uploaded_files:
                 st.subheader("Data Statistics")
                 time_diff = (filtered_df['appointment_date'].max() - filtered_df['appointment_date'].min()).days
                 weeks = time_diff / 7
-                metric_value = (len(filtered_df) / list_size) * 1000 / weeks if weeks > 0 else 0
+                months = time_diff / 30.44
 
-                col1, col2, col3, col4, col5 = st.columns(5)
+                # Determine if ARRS should be applied based on filtered end date
+                filtered_end_date = filtered_df['appointment_date'].max().date()
+                should_apply_arrs = filtered_end_date >= arrs_end_date and arrs_2526 > 0
+
+                if arrs_future and should_apply_arrs:
+                    # Calculate weeks from ARRS end date to filtered end date for future estimation
+                    future_weeks = (filtered_end_date - arrs_end_date).days / 7
+                    future_arrs_apps = int(round(estimated_weekly_arrs * future_weeks, 0))
+                    total_apps_arrs = len(filtered_df) + arrs_2526 + future_arrs_apps
+                elif should_apply_arrs:
+                    total_apps_arrs = len(filtered_df) + arrs_2526
+                else:
+                    total_apps_arrs = len(filtered_df)
+
+                av_1000_week = (total_apps_arrs / list_size) * 1000 / weeks if weeks > 0 else 0
+
+                col1, col2, col3, col4 = st.columns(4)
+                start_date = filtered_df['appointment_date'].min().strftime('%d %b %y')
+                end_date = filtered_df['appointment_date'].max().strftime('%d %b %y')
                 with col1:
-                    st.metric("Filtered Rows", len(filtered_df))
+                    st.metric("Total Surgery Appointments", len(filtered_df))
                 with col2:
-                    start_date = filtered_df['appointment_date'].min().strftime('%d %b %y')
-                    st.metric("Start Date", start_date)
+                    if should_apply_arrs:
+                        if arrs_future:
+                            total_arrs_estimated = arrs_2526 + future_arrs_apps
+                            st.metric(f"Total ARRS estimated to {end_date}", total_arrs_estimated)
+                            st.badge(f"+ Future ARRS Applied! ({arrs_2526} + {future_arrs_apps})", color='red')
+                        else:
+                            st.metric(f"Total ARRS to end {arrs_month}", arrs_2526)
+                            st.badge(f"ARRS Applied till {arrs_month}", color='green')
+                    else:
+                        st.metric("Total ARRS Applied", 0)
+                        st.badge(f"No ARRS - End date before {arrs_month}", color='orange')
+
                 with col3:
-                    end_date = filtered_df['appointment_date'].max().strftime('%d %b %y')
-                    st.metric("End Date", end_date)
+                    st.metric("Start Date", start_date)
                 with col4:
+                    st.metric("End Date", end_date)
+
+
+                # Second row of metrics
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
                     st.metric("Time Range (Weeks)", f"{weeks:.1f}")
-                with col5:
-                    st.metric("Metric Value", f"{metric_value:.2f}")
+                with col2:
+                    st.metric("Time Range (Months)", f"{months:.1f}")
+                with col3:
+                    st.metric("Total apps + ARRS", f"{total_apps_arrs}")
+                with col4:
+                    st.metric("Average apps per 1000 per week", f"{av_1000_week:.2f}")
+                    if av_1000_week > 200:
+                        st.badge(f"Enter Weighted list size in sidebar", color='red')
+                    elif av_1000_week >= 84.5 and av_1000_week <= 200:
+                        st.badge(f"100% Access Payment", color='green')
+                    elif av_1000_week >= 75 and av_1000_week < 84.5:
+                        st.badge(f"75% Access Payment", color='yellow')
+                    else:
+                        st.badge(f"< 75% Access Payment", color='orange')
+
+
 
             else:
                 st.warning("Please select at least one clinician and rota type to display.")
@@ -335,14 +473,14 @@ if uploaded_files:
             st.warning("Required columns (appointment_date, clinician, appointment_status, rota_type) not found in the uploaded data.")
 
         # Display total data statistics
-        st.subheader("Total Data Statistics")
+        st.markdown("**Total Data Statistics** (Original Dataframe)")
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric("Total Rows (All Data)", len(combined_df))
+            st.badge(f"Total Rows (All Data) **{len(combined_df)}**", color="blue")
         with col2:
-            st.metric("Total Columns", len(combined_df.columns))
+            st.badge(f"Total Columns (All Data) **{len(combined_df.columns)}**", color="blue")
         with col3:
-            st.metric("Files Merged", len(file_names))
+            st.badge(f"Total Files **{len(file_names)}** ", color="blue")
 
         # Show file information
         with st.expander("File Information"):
