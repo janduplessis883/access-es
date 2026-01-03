@@ -583,8 +583,8 @@ if uploaded_files:
                     st.metric("Total apps + ARRS", f"{total_apps_arrs}")
                 with col4:
                     st.metric("Average apps per 1000 per week", f"{av_1000_week:.2f}")
-                    if av_1000_week > 200:
-                        st.badge(f"Enter Weighted list size in sidebar", color='red')
+                    if av_1000_week < 150:
+                        st.badge(f"Enter Weighted list size in sidebar", color='yellow')
                     elif av_1000_week > 85:
                         st.badge(f"100% Access Payment", color='green')
                     elif av_1000_week >= 75 and av_1000_week <= 85:
