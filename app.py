@@ -4,10 +4,10 @@ import plotly.express as px
 import io
 from datetime import date
 
-st.set_page_config(page_title="Access ES Tracker", layout="wide", page_icon=':material/child_hat:')
+st.set_page_config(page_title=":material/switch_access_shortcut_add: Access ES Tracker", layout="wide")
 
-st.title("Access ES Tracker")
-st.caption("Check your Access ES appointment provision.")
+st.title(":material/switch_access_shortcut_add: Access ES Tracker")
+st.caption("Check your :material/switch_access_shortcut_add: Access ES appointment provision.")
 
 # Sidebar for file uploads
 with st.sidebar:
@@ -39,7 +39,7 @@ with st.sidebar:
     )
 
     if exclude_did_not_attend:
-        st.info("✅ 'Did Not Attend' appointments excluded.")
+        st.info(":material/done_outline: 'Did Not Attend' appointments excluded.")
     else:
         st.error("⚠️ Remove 'Did Not Attend' appointments, for accurate calculations.")
         
@@ -56,8 +56,11 @@ with st.sidebar:
     st.divider()
 
     st.header("ARRS Allocation")
-    arrs_2526 = st.number_input("Total ARRS to date.", min_value=0, value=0, step=1, help="Enter your **ARRS allocation** for the year do date and press **Enter**, Set the **date of allocation** in the select box below.")
+    arrs_2526 = st.number_input("Total ARRS to date.", min_value=1, value=10, step=1, help="Enter your **ARRS allocation** for the year do date and press **Enter**, Set the **date of allocation** in the select box below.")
 
+    # Initialize ARRS variables
+    estimated_weekly_arrs = 0.0
+    
     # Map month selections to end of month dates
     arrs_month_map = {
         "April 25": date(2025, 4, 30),
@@ -90,17 +93,29 @@ with st.sidebar:
         arrs_future = st.checkbox('Estimate Future ARRS?', value=False, help="Estimate future ARRS based on current weekly rate")
         if arrs_future:
             estimated_weekly_arrs = arrs_2526 / arrs_weeks_span
-            st.info(f"✅ Future ARRS estimation at **{estimated_weekly_arrs:.0f}** ARRS apps per week - or **{estimated_weekly_arrs/list_size*1000:.2f}** ARRS apps per 1000 per week")
+            st.info(f":material/done_outline: Future ARRS estimation at **{estimated_weekly_arrs:.0f}** ARRS apps per week - or **{estimated_weekly_arrs/list_size*1000:.2f}** ARRS apps per 1000 per week")
         else:
             st.error(f"⚠️ ARRS **will not be applied** to future months! Your Average Apps per 1000 per week will be underestimated.")
+
+    st.divider()
+    st.subheader(":material/labs: Experimental")
+    exp_add_apps_per_week = st.slider(
+        "Experiment: Add Apps per Week",
+        min_value=0,
+        max_value=500,
+        value=0,
+        step=5,
+        help="Simulate adding more appointments per week for the REMAINING period of the financial year."
+    )
+    
     st.divider()
 
     show_dataframe = st.checkbox(
-        "Show Filtered Data Table",
+        ":material/table: Show Filtered Data Table",
         value=False,
         help="Display the filtered dataframe below the scatter plot"
     )
-
+    
 # Main content area
 if uploaded_files:
     # Concatenate all uploaded CSV files
@@ -150,7 +165,7 @@ if uploaded_files:
         # Scatter plot section
         st.subheader("Filters and Visualization")
         if drop_duplicates:
-            st.badge(f"✅  Dropped **{combined_df.duplicated().sum()}** duplicated rows.", color='blue')
+            st.badge(f":material/done_outline:  Dropped **{combined_df.duplicated().sum()}** duplicated rows.", color='blue')
             combined_df = combined_df.drop_duplicates(keep='first')
         else:
             st.badge(f"⚠️ **{combined_df.duplicated().sum()}** Duplicated rows identified.", color='blue')
@@ -228,7 +243,7 @@ if uploaded_files:
                     filtered_df = filtered_df[filtered_df['appointment_status'] != 'Did Not Attend']
                     dna_count_excluded = dna_count_before - len(filtered_df)
                     dna_percentage = (dna_count_excluded / dna_count_before) * 100
-                    st.success(f"✓ Excluded {dna_count_excluded} 'Did Not Attend' appointments ({dna_percentage:.1f}% of total)")
+                    st.success(f":material/done_outline: Excluded {dna_count_excluded} 'Did Not Attend' appointments ({dna_percentage:.1f}% of total)")
 
                 # Determine if ARRS should be applied based on slider end date (not data end date)
                 # This ensures ARRS is applied if the user selects a date range that extends to the ARRS month end
@@ -246,295 +261,415 @@ if uploaded_files:
                 weekly_df = filtered_df.copy()
                 weekly_df['week'] = weekly_df['appointment_date'].dt.to_period('W').dt.start_time
                 weekly_agg = weekly_df.groupby('week').size().reset_index(name='total_appointments')
-
+                
+                weekly_agg['per_1000'] = weekly_agg['total_appointments']/list_size*1000
+                # ARRS applied as flat rate across all weeks
+                weekly_agg['arrs_only'] = estimated_weekly_arrs
+                weekly_agg['total_with_arrs'] = weekly_agg['total_appointments'] + estimated_weekly_arrs
+                weekly_agg['per_1000_with_arrs'] = weekly_agg['per_1000'] + (estimated_weekly_arrs/list_size*1000)
+                
                 # Create monthly aggregation for all appointments in filtered dataframe
                 monthly_df = filtered_df.copy()
                 monthly_df['month'] = monthly_df['appointment_date'].dt.to_period('M').dt.start_time
                 monthly_agg = monthly_df.groupby('month').size().reset_index(name='total_appointments')
-
+                # Add monthly ARRS estimate (approximately 4.345 weeks per month)
+                monthly_agg['total_arrs_estimated'] = estimated_weekly_arrs * 4.345
+                monthly_agg['total_with_arrs'] = monthly_agg['total_appointments'] + monthly_agg['total_arrs_estimated']
+                
                 # Calculate dynamic height based on number of clinicians
                 base_height = 300
                 height_per_clinician = 15
                 fig_height = base_height + (len(selected_clinicians) * height_per_clinician)
 
                 # Display plot based on selected view option
-                if plot_view_option == "Rota Type":
-                    # Y: Clinician, Hue: Rota Type
-                    fig = px.strip(
-                        filtered_df,
-                        x='appointment_date',
-                        y='clinician',
-                        color='rota_type',
-                        title="Appointments by Date and Clinician (Colored by Rota Type)",
+                with st.expander("Visualizations - Scatter Plots Appointments", icon=":material/scatter_plot:", expanded=False):
+                    st.subheader(":material/scatter_plot: Visualizations")
+                    if plot_view_option == "Rota Type":
+                        # Y: Clinician, Hue: Rota Type
+                        fig = px.strip(
+                            filtered_df,
+                            x='appointment_date',
+                            y='clinician',
+                            color='rota_type',
+                            title="Appointments by Date and Clinician (Colored by Rota Type)",
+                            labels={
+                                'appointment_date': 'Appointment Date',
+                                'clinician': 'Clinician',
+                                'rota_type': 'Rota Type'
+                            },
+                            height=fig_height
+                        )
+
+                    elif plot_view_option == "App Flags":
+                        # Y: Clinician, Hue: Appointment Flags
+                        fig = px.strip(
+                            filtered_df,
+                            x='appointment_date',
+                            y='clinician',
+                            color='appointment_flags',
+                            title="Appointments by Date and Clinician (Colored by Appointment Flags)",
+                            labels={
+                                'appointment_date': 'Appointment Date',
+                                'clinician': 'Clinician',
+                                'appointment_flags': 'Appointment Flags'
+                            },
+                            height=fig_height
+                        )
+
+                    elif plot_view_option == "DNAs":
+                        # Y: Clinician, Hue: DNAs (appointment_status)
+                        # Sort so 'Finished' appointments are plotted first, 'Did Not Attend' on top
+                        plot_df_dna = filtered_df.copy()
+                        status_order = {'Finished': 0, 'Did Not Attend': 1}
+                        plot_df_dna['_status_sort'] = plot_df_dna['appointment_status'].map(status_order)
+                        plot_df_dna = plot_df_dna.sort_values('_status_sort')
+
+                        fig = px.strip(
+                            plot_df_dna,
+                            x='appointment_date',
+                            y='clinician',
+                            color='appointment_status',
+                            title="Appointments by Date and Clinician (Colored by DNAs)",
+                            labels={
+                                'appointment_date': 'Appointment Date',
+                                'clinician': 'Clinician',
+                                'appointment_status': 'DNAs'
+                            },
+                            height=fig_height
+                        )
+                        # Set marker opacity for transparency
+                        fig.update_traces(marker=dict(opacity=0.6))
+
+                    elif plot_view_option == "Rota/Flags":
+                        # Y: Appointment Flags, Hue: Rota Type
+                        num_flags = filtered_df['appointment_flags'].nunique()
+                        flags_base_height = 300
+                        height_per_flag = 15
+                        flags_fig_height = flags_base_height + (num_flags * height_per_flag)
+
+                        fig = px.strip(
+                            filtered_df,
+                            x='appointment_date',
+                            y='appointment_flags',
+                            color='rota_type',
+                            title="Appointments by Date and Flags (Colored by Rota Type)",
+                            labels={
+                                'appointment_date': 'Appointment Date',
+                                'appointment_flags': 'Appointment Flags',
+                                'rota_type': 'Rota Type'
+                            },
+                            height=flags_fig_height
+                        )
+                        fig_height = flags_fig_height
+
+                    fig.update_layout(
+                        xaxis_title="Appointment Date",
+                        yaxis_title="Clinician" if plot_view_option != "Rota/Flags" else "Appointment Flags",
+                        hovermode='closest',
+                        xaxis=dict(
+                            showgrid=True,
+                            gridwidth=1,
+                            gridcolor='lightgray'
+                        ),
+                        yaxis=dict(
+                            showgrid=True,
+                            gridwidth=1,
+                            gridcolor='lightgray'
+                        )
+                    )
+
+                    st.plotly_chart(fig, width='stretch')
+
+                # Weekly & Monthly Trends
+                with st.expander("Visualizations - Weekly & Monthly Trends", icon=":material/bar_chart:", expanded=False):
+                    st.subheader(":material/bar_chart: Weekly & Monthly Trends")
+
+                    # Calculate time range for calculations
+                    time_diff_days = (date_range[1] - date_range[0]).days
+                    months_calc = time_diff_days / 30.4
+
+                    # Toggle for weekly view options
+                    show_per_1000 = st.toggle(
+                        "Apps per 1000 per week",
+                        value=False,
+                        help="Toggle between Actual Appointment counts (Bar) and Apps per 1000 per week (Line)"
+                    )
+
+                    # Calculate threshold line
+                    threshold = (85 / 1000) * list_size
+
+                    # Prepare data for plotting
+                    weekly_agg_plot = weekly_agg.copy()
+                    
+                    if show_per_1000:
+                        y_plot = "per_1000"
+                        y_label = "Apps per 1000 per week"
+                        threshold_plot = 85.0
+                        plot_select_title = "Appointments per 1000 pts per Week"
+                    else:
+                        y_plot = "total_appointments"
+                        y_label = "Count"
+                        threshold_plot = threshold
+                        plot_select_title = "Total Appointments per Week"
+
+                        
+                    if not show_per_1000:
+                        # Bar chart for total appointments
+                        fig_weekly = px.bar(
+                            weekly_agg_plot,
+                            x='week',
+                            y=[y_plot, 'arrs_only'],
+                            title=plot_select_title,
+                            labels={
+                                'week': 'Week Starting Date',
+                                'value': 'Count',
+                                'variable': 'Type'
+                            },
+                            height=500,
+                            color_discrete_map={
+                                y_plot: '#0077b6',
+                                'arrs_only': '#f48c06'
+                            }
+                        )
+                        
+                        # Add custom text labels
+                        # Blue segment: Actual value
+                        # Orange segment: Total value
+                        fig_weekly.update_traces(
+                            selector=dict(name=y_plot),
+                            text=weekly_agg_plot[y_plot],
+                            textposition='inside'
+                        )
+                        fig_weekly.update_traces(
+                            selector=dict(name='arrs_only'),
+                            text=weekly_agg_plot['total_with_arrs'].round(0),
+                            textposition='inside'
+                        )
+                        
+                        # Update legend names
+                        newnames = {y_plot: 'Actual Appointments', 'arrs_only': 'Estimated ARRS'}
+                        fig_weekly.for_each_trace(lambda t: t.update(name = newnames.get(t.name, t.name)))
+
+                        # Add threshold line to weekly bar plot
+                        fig_weekly.add_hline(
+                            y=threshold,
+                            line_dash='dot',
+                            line_color='#c1121f',
+                            annotation_text=f'Threshold ({threshold:.2f})',
+                            annotation_position='top right'
+                        )
+                    else:
+                        fig_weekly = px.line(
+                            weekly_agg_plot,
+                            x='week',
+                            y=y_plot,
+                            title=plot_select_title,
+                            labels={
+                                'week': 'Week Starting Date',
+                                y_plot: y_label
+                            },
+                            height=500,
+                            markers=False,
+                            color_discrete_sequence=['#0077b6']
+                        )
+                        
+                        # Update first line name for legend and add data labels
+                        fig_weekly.update_traces(
+                            name="Actual Apps per 1000",
+                            showlegend=True,
+                            text=weekly_agg_plot[y_plot].round(2),
+                            textposition='top center',
+                            mode='lines+text',
+                            textfont=dict(size=10)
+                        )
+                        
+                        # Add second line for per_1000_with_arrs
+                        fig_weekly.add_scatter(
+                            x=weekly_agg_plot['week'],
+                            y=weekly_agg_plot['per_1000_with_arrs'],
+                            mode='lines+text',
+                            name='Apps per 1000 + ARRS',
+                            line=dict(dash='solid', color='#f48c06'),
+                            text=weekly_agg_plot['per_1000_with_arrs'].round(2),
+                            textposition='top center',
+                            textfont=dict(size=10)
+                        )
+
+                        # Add threshold line to weekly plot
+                        fig_weekly.add_hline(
+                            y=threshold_plot,
+                            line_dash='dash',
+                            line_color='#c1121f',
+                            line_width=1,
+                            annotation_text=f'Threshold ({threshold_plot:.2f})',
+                            annotation_position='top right'
+                        )
+
+                        # Add mean line for per_1000_with_arrs if in per 1000 view
+                        if show_per_1000:
+                            mean_val = weekly_agg_plot['per_1000_with_arrs'].mean()
+                            fig_weekly.add_hline(
+                                y=mean_val,
+                                line_dash='dot',
+                                line_color='#6a994e',
+                                line_width=1,
+                                annotation_text=f'Mean Apps + ARRS ({mean_val:.2f})',
+                                annotation_position='top right'
+                            )
+
+                    # Add ARRS end date vertical line if applicable
+                    if should_apply_arrs:
+                        fig_weekly.add_vline(
+                            x=pd.Timestamp(arrs_end_date),
+                            line_dash='dashdot',
+                            line_color='#749857'
+                        )
+                        fig_weekly.add_annotation(
+                            x=pd.Timestamp(arrs_end_date),
+                            text='ARRS Prediction Start',
+                            showarrow=False,
+                            xanchor='right',
+                            yanchor='top'
+                        )
+
+
+                    fig_weekly.update_layout(
+                        xaxis_title="Week Starting Date",
+                        yaxis_title="Total Appointments",
+                        hovermode='x unified',
+                        xaxis=dict(
+                            showgrid=True,
+                            gridwidth=1,
+                            gridcolor='lightgray'
+                        ),
+                        yaxis=dict(
+                            showgrid=True,
+                            gridwidth=1,
+                            gridcolor='lightgray'
+                        )
+                    )
+
+                    st.plotly_chart(fig_weekly, width='stretch')
+
+                    # Calculate average monthly appointments
+                    avg_monthly_appointments = monthly_agg['total_appointments'].mean()
+
+                    # Prepare data for monthly stacked bar chart (using pre-calculated columns)
+                    monthly_agg_plot = monthly_agg.copy()
+
+                    # Create stacked bar plot for monthly appointments
+                    fig_monthly = px.bar(
+                        monthly_agg_plot,
+                        x='month',
+                        y=['total_appointments', 'total_arrs_estimated'],
+                        title='Total Appointments per Month',
                         labels={
-                            'appointment_date': 'Appointment Date',
-                            'clinician': 'Clinician',
-                            'rota_type': 'Rota Type'
+                            'month': 'Month',
+                            'value': 'Count',
+                            'variable': 'Type'
                         },
-                        height=fig_height
+                        height=400,
+                        color_discrete_map={
+                            'total_appointments': '#0077b6',
+                            'total_arrs_estimated': '#f48c06'
+                        }
                     )
 
-                elif plot_view_option == "App Flags":
-                    # Y: Clinician, Hue: Appointment Flags
-                    fig = px.strip(
-                        filtered_df,
-                        x='appointment_date',
-                        y='clinician',
-                        color='appointment_flags',
-                        title="Appointments by Date and Clinician (Colored by Appointment Flags)",
-                        labels={
-                            'appointment_date': 'Appointment Date',
-                            'clinician': 'Clinician',
-                            'appointment_flags': 'Appointment Flags'
-                        },
-                        height=fig_height
+                    # Add custom text labels
+                    fig_monthly.update_traces(
+                        selector=dict(name='total_appointments'),
+                        text=monthly_agg_plot['total_appointments'],
+                        textposition='inside'
+                    )
+                    fig_monthly.update_traces(
+                        selector=dict(name='total_arrs_estimated'),
+                        text=monthly_agg_plot['total_with_arrs'].round(0),
+                        textposition='inside'
                     )
 
-                elif plot_view_option == "DNAs":
-                    # Y: Clinician, Hue: DNAs (appointment_status)
-                    # Sort so 'Finished' appointments are plotted first, 'Did Not Attend' on top
-                    plot_df_dna = filtered_df.copy()
-                    status_order = {'Finished': 0, 'Did Not Attend': 1}
-                    plot_df_dna['_status_sort'] = plot_df_dna['appointment_status'].map(status_order)
-                    plot_df_dna = plot_df_dna.sort_values('_status_sort')
+                    # Update legend names
+                    newnames_monthly = {'total_appointments': 'Actual Appointments', 'total_arrs_estimated': 'Monthly ARRS'}
+                    fig_monthly.for_each_trace(lambda t: t.update(name = newnames_monthly.get(t.name, t.name)))
 
-                    fig = px.strip(
-                        plot_df_dna,
-                        x='appointment_date',
-                        y='clinician',
-                        color='appointment_status',
-                        title="Appointments by Date and Clinician (Colored by DNAs)",
-                        labels={
-                            'appointment_date': 'Appointment Date',
-                            'clinician': 'Clinician',
-                            'appointment_status': 'DNAs'
-                        },
-                        height=fig_height
-                    )
-                    # Set marker opacity for transparency
-                    fig.update_traces(marker=dict(opacity=0.6))
 
-                elif plot_view_option == "Rota/Flags":
-                    # Y: Appointment Flags, Hue: Rota Type
-                    num_flags = filtered_df['appointment_flags'].nunique()
-                    flags_base_height = 300
-                    height_per_flag = 15
-                    flags_fig_height = flags_base_height + (num_flags * height_per_flag)
-
-                    fig = px.strip(
-                        filtered_df,
-                        x='appointment_date',
-                        y='appointment_flags',
-                        color='rota_type',
-                        title="Appointments by Date and Flags (Colored by Rota Type)",
-                        labels={
-                            'appointment_date': 'Appointment Date',
-                            'appointment_flags': 'Appointment Flags',
-                            'rota_type': 'Rota Type'
-                        },
-                        height=flags_fig_height
-                    )
-                    fig_height = flags_fig_height
-
-                fig.update_layout(
-                    xaxis_title="Appointment Date",
-                    yaxis_title="Clinician" if plot_view_option != "Rota/Flags" else "Appointment Flags",
-                    hovermode='closest',
-                    xaxis=dict(
-                        showgrid=True,
-                        gridwidth=1,
-                        gridcolor='lightgray'
-                    ),
-                    yaxis=dict(
-                        showgrid=True,
-                        gridwidth=1,
-                        gridcolor='lightgray'
-                    )
-                )
-
-                st.plotly_chart(fig, width='stretch')
-
-                # Calculate threshold line
-                threshold = (85 / 1000) * list_size
-
-                # Calculate average weekly appointments
-                avg_weekly_appointments = weekly_agg['total_appointments'].mean()
-
-                # Create line plot for weekly appointments
-                fig_weekly = px.line(
-                    weekly_agg,
-                    x='week',
-                    y='total_appointments',
-                    title='Total Appointments per Week',
-                    labels={
-                        'week': 'Week Starting Date',
-                        'total_appointments': 'Total Appointments'
-                    },
-                    height=400,
-                    markers=True
-                )
-
-                # Add average line to weekly plot
-                fig_weekly.add_hline(
-                    y=avg_weekly_appointments,
-                    line_dash='dot',
-                    line_color='#e4af6c',
-                    annotation_text=f'Weekly Average Completed Apps ({avg_weekly_appointments:.1f})',
-                    annotation_position='top left'
-                )
-
-                # Add threshold line to weekly plot
-                fig_weekly.add_hline(
-                    y=threshold,
-                    line_dash='dash',
-                    line_color='#ae4f4d',
-                    annotation_text=f'Threshold ({threshold:.2f})',
-                    annotation_position='top right'
-                )
-
-                # Add ARRS end date vertical line if applicable
-                if should_apply_arrs:
-                    fig_weekly.add_vline(
-                        x=pd.Timestamp(arrs_end_date),
-                        line_dash='dashdot',
-                        line_color='#749857'
-                    )
-                    fig_weekly.add_annotation(
-                        x=pd.Timestamp(arrs_end_date),
-                        text='ARRS Prediction Start',
-                        showarrow=False,
-                        xanchor='right',
-                        yanchor='top'
-                    )
-
-                # Add estimated ARRS indicator if applicable
-                if arrs_future and should_apply_arrs:
-                    # Add yellow horizontal band showing estimated weekly ARRS rate
-                    fig_weekly.add_hline(
-                        y=estimated_weekly_arrs,
-                        line_dash='dot',
-                        line_color='#7d2e61',
-                        annotation_text=f'Est. Weekly ARRS ({estimated_weekly_arrs:.0f})',
-                        annotation_position='top left'
-                    )
-
-                fig_weekly.update_layout(
-                    xaxis_title="Week Starting Date",
-                    yaxis_title="Total Appointments",
-                    hovermode='x unified',
-                    xaxis=dict(
-                        showgrid=True,
-                        gridwidth=1,
-                        gridcolor='lightgray'
-                    ),
-                    yaxis=dict(
-                        showgrid=True,
-                        gridwidth=1,
-                        gridcolor='lightgray'
-                    )
-                )
-
-                st.plotly_chart(fig_weekly, width='stretch')
-
-                # Calculate average monthly appointments
-                avg_monthly_appointments = monthly_agg['total_appointments'].mean()
-
-                # Create line plot for monthly appointments without threshold line
-                fig_monthly = px.line(
-                    monthly_agg,
-                    x='month',
-                    y='total_appointments',
-                    title='Total Appointments per Month',
-                    labels={
-                        'month': 'Month',
-                        'total_appointments': 'Total Appointments'
-                    },
-                    height=400,
-                    markers=True
-                )
-
-                # Add average line to monthly plot
-                fig_monthly.add_hline(
-                    y=avg_monthly_appointments,
-                    line_dash='dot',
-                    line_color='#e4af6c',
-                    annotation_text=f'Monthly Average Completed Apps ({avg_monthly_appointments:.1f})',
-                    annotation_position='top left'
-                )
-
-                # Add ARRS end date vertical line if applicable
-                if should_apply_arrs:
-                    fig_monthly.add_vline(
-                        x=pd.Timestamp(arrs_end_date),
-                        line_dash='dashdot',
-                        line_color='#749857'
-                    )
-                    fig_monthly.add_annotation(
-                        x=pd.Timestamp(arrs_end_date),
-                        text='ARRS Prediction Start',
-                        showarrow=False,
-                        xanchor='right',
-                        yanchor='top'
-                    )
-
-                # Add estimated ARRS indicator if applicable
-                if arrs_future and should_apply_arrs:
-                    # Add yellow horizontal band showing estimated weekly ARRS rate
+                    # Add average line to monthly plot
                     fig_monthly.add_hline(
-                        y=estimated_weekly_arrs,
+                        y=avg_monthly_appointments,
                         line_dash='dot',
-                        line_color='#7d2e61',
-                        annotation_text=f'Est. Weekly ARRS ({estimated_weekly_arrs:.0f})',
+                        line_color='#e4af6c',
+                        annotation_text=f'Monthly Average Completed Apps ({avg_monthly_appointments:.1f})',
                         annotation_position='top left'
                     )
 
-                fig_monthly.update_layout(
-                    xaxis_title="Month",
-                    yaxis_title="Total Appointments",
-                    hovermode='x unified',
-                    xaxis=dict(
-                        showgrid=True,
-                        gridwidth=1,
-                        gridcolor='lightgray'
-                    ),
-                    yaxis=dict(
-                        showgrid=True,
-                        gridwidth=1,
-                        gridcolor='lightgray'
-                    )
-                )
+                    # Add ARRS end date vertical line if applicable
+                    if should_apply_arrs:
+                        fig_monthly.add_vline(
+                            x=pd.Timestamp(arrs_end_date),
+                            line_dash='dashdot',
+                            line_color='#749857'
+                        )
+                        fig_monthly.add_annotation(
+                            x=pd.Timestamp(arrs_end_date),
+                            text='ARRS Prediction Start',
+                            showarrow=False,
+                            xanchor='right',
+                            yanchor='top'
+                        )
 
-                st.plotly_chart(fig_monthly, width='stretch')
+                    fig_monthly.update_layout(
+                        xaxis_title="Month",
+                        yaxis_title="Total Appointments",
+                        hovermode='x unified',
+                        xaxis=dict(
+                            showgrid=True,
+                            gridwidth=1,
+                            gridcolor='lightgray'
+                        ),
+                        yaxis=dict(
+                            showgrid=True,
+                            gridwidth=1,
+                            gridcolor='lightgray'
+                        )
+                    )
+
+                    st.plotly_chart(fig_monthly, width='stretch')
 
                 # Display filtered dataframe if checkbox is enabled
                 if show_dataframe:
-                    st.subheader("Filtered Data Table")
+                    st.subheader(":material/table: Filtered Data Table")
                     st.dataframe(filtered_df, width='stretch')
 
-                # Display dynamic statistics based on filtered data
-                st.subheader("Data Statistics")
-                col1, col2 = st.columns([1,6])
-                with col1:
-                    if drop_duplicates:
-                        st.badge("✅ Duplicates dropped", color='green')
-                    else:
-                        st.badge("⚠️ Duplicate entries", color='yellow')
-                with col2:
-                    if exclude_did_not_attend:
-                        st.badge("✅ Excluding 'Did Not Attend'", color='green')
-                    else:
-                        st.badge("⚠️ Includes 'Did Not Attend'", color='yellow')  
-                    
                 # Calculate time_diff based on SLIDER range, not data range
                 # This ensures the denominator (weeks) correctly reflects the period selected by the user,
                 # even if there are gaps in the data (e.g. no appointments on weekends or holidays).
-                time_diff = (date_range[1] - date_range[0]).days
+                if isinstance(date_range[0], pd.Timestamp):
+                    d_start = date_range[0].date()
+                else:
+                    d_start = date_range[0]
+                
+                if isinstance(date_range[1], pd.Timestamp):
+                    d_end = date_range[1].date()
+                else:
+                    d_end = date_range[1]
+                    
+                time_diff = (d_end - d_start).days
                 weeks = time_diff / 7
                 months = time_diff / 30.44
 
                 if arrs_future and should_apply_arrs:
                     # Calculate weeks from ARRS end date to slider end date for future estimation
-                    future_weeks = (slider_end_date - arrs_end_date).days / 7
+                    if isinstance(slider_end_date, pd.Timestamp):
+                        s_end = slider_end_date.date()
+                    else:
+                        s_end = slider_end_date
+                    
+                    if isinstance(arrs_end_date, pd.Timestamp):
+                        a_end = arrs_end_date.date()
+                    else:
+                        a_end = arrs_end_date
+                        
+                    days_fut = (s_end - a_end).days
+                    future_weeks = days_fut / 7
                     future_arrs_apps = int(round(estimated_weekly_arrs * future_weeks, 0)) if future_weeks > 0 else 0
                     total_apps_arrs = len(filtered_df) + arrs_2526 + future_arrs_apps
                 elif should_apply_arrs:
@@ -544,53 +679,213 @@ if uploaded_files:
                     total_apps_arrs = len(filtered_df)
                     future_arrs_apps = 0
 
+                # Total Surgery Appointments (Historical ONLY)
+                total_surgery_apps = len(filtered_df)
+                total_apps_arrs = total_surgery_apps + (arrs_2526 + future_arrs_apps if should_apply_arrs else 0)
+
                 av_1000_week = (total_apps_arrs / list_size) * 1000 / weeks if weeks > 0 else 0
 
-
-                col1, col2, col3, col4 = st.columns(4)
-                start_date = filtered_df['appointment_date'].min().strftime('%d %b %y')
-                end_date = filtered_df['appointment_date'].max().strftime('%d %b %y')
-                with col1:
-                    st.metric("Total Surgery Appointments", len(filtered_df))
-                    st.badge(f"{len(filtered_df)/13958*1000/weeks:.2f} apps per 1000 per week")
-
-                with col2:
-                    if should_apply_arrs:
-                        if arrs_future:
-                            total_arrs_estimated = arrs_2526 + future_arrs_apps
-                            st.metric(f"Total ARRS estimated to {end_date}", total_arrs_estimated)
-                            st.badge(f"+ Future ARRS Applied! ({arrs_2526} + {future_arrs_apps})", color='yellow')
+                # Display dynamic statistics based on filtered data
+                with st.expander("**Data Statistics**", icon=":material/database:", expanded=True):
+                    st.subheader(":material/database: Data Statistics")
+                    col1, col2 = st.columns([1,6])
+                    with col1:
+                        if drop_duplicates:
+                            st.badge(":material/done_outline: Duplicates dropped", color='green')
                         else:
-                            st.metric(f"Total ARRS to end {arrs_month}", arrs_2526)
-                            st.badge(f"ARRS Applied till {arrs_month}", color='green')
+                            st.badge("⚠️ Duplicate entries", color='yellow')
+                    with col2:
+                        if exclude_did_not_attend:
+                            st.badge(":material/done_outline: Excluding 'Did Not Attend'", color='green')
+                        else:
+                            st.badge("⚠️ Includes 'Did Not Attend'", color='yellow')  
+
+                    col1, col2, col3, col4 = st.columns(4)
+                    start_date = filtered_df['appointment_date'].min().strftime('%d %b %y')
+                    end_date = filtered_df['appointment_date'].max().strftime('%d %b %y')
+                    with col1:
+                        st.metric("Total Surgery Appointments", total_surgery_apps)
+                        st.badge(f"{total_surgery_apps/list_size*1000/weeks:.2f} apps per 1000 per week")
+
+                    with col2:
+                        if should_apply_arrs:
+                            if arrs_future:
+                                total_arrs_estimated = arrs_2526 + future_arrs_apps
+                                st.metric(f"Total ARRS estimated to {end_date}", total_arrs_estimated)
+                                st.badge(f"+ Future ARRS Applied! ({arrs_2526} + {future_arrs_apps})", color='yellow')
+                            else:
+                                st.metric(f"Total ARRS to end {arrs_month}", arrs_2526)
+                                st.badge(f"ARRS Applied till {arrs_month}", color='green')
+                        else:
+                            st.metric("Total ARRS Applied", 0)
+                            st.badge(f"No ARRS - End date before {arrs_month}", color='orange')
+
+                    with col3:
+                        st.metric("Start Date", start_date)
+                    with col4:
+                        st.metric("End Date", end_date)
+
+
+                    # Second row of metrics
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric("Time Range (Weeks)", f"{weeks:.1f}")
+                    with col2:
+                        st.metric("Time Range (Months)", f"{months:.1f}")
+                    with col3:
+                        st.metric("Total apps + ARRS", f"{total_apps_arrs}")
+                    with col4:
+                        st.metric("Average apps per 1000 per week", f"{av_1000_week:.2f}")
+                        if av_1000_week < 150:
+                            st.badge(f"Enter Weighted list size in sidebar", color='yellow')
+                        elif av_1000_week > 85:
+                            st.badge(f"100% Access Payment", color='green')
+                        elif av_1000_week >= 75 and av_1000_week <= 85:
+                            st.badge(f"75% Access Payment", color='yellow')
+                        else:
+                            st.badge(f"< 75% Access Payment", color='orange')
+
+                # Target Achievement Calculator
+                fy_start = date(2025, 4, 1)
+                fy_end = date(2026, 3, 31)
+                last_data_date = filtered_df['appointment_date'].max().date()
+                
+                if last_data_date < fy_end:
+                    # 1. Calculate Weeks Elapsed and Remaining
+                    # Use the start of the FY or the first date in data, whichever is earlier
+                    data_start_date = filtered_df['appointment_date'].min().date()
+                    calc_start_date = min(fy_start, data_start_date)
+                    
+                    if isinstance(last_data_date, pd.Timestamp):
+                        l_date = last_data_date.date()
                     else:
-                        st.metric("Total ARRS Applied", 0)
-                        st.badge(f"No ARRS - End date before {arrs_month}", color='orange')
-
-                with col3:
-                    st.metric("Start Date", start_date)
-                with col4:
-                    st.metric("End Date", end_date)
-
-
-                # Second row of metrics
-                col1, col2, col3, col4 = st.columns(4)
-                with col1:
-                    st.metric("Time Range (Weeks)", f"{weeks:.1f}")
-                with col2:
-                    st.metric("Time Range (Months)", f"{months:.1f}")
-                with col3:
-                    st.metric("Total apps + ARRS", f"{total_apps_arrs}")
-                with col4:
-                    st.metric("Average apps per 1000 per week", f"{av_1000_week:.2f}")
-                    if av_1000_week < 150:
-                        st.badge(f"Enter Weighted list size in sidebar", color='yellow')
-                    elif av_1000_week > 85:
-                        st.badge(f"100% Access Payment", color='green')
-                    elif av_1000_week >= 75 and av_1000_week <= 85:
-                        st.badge(f"75% Access Payment", color='yellow')
+                        l_date = last_data_date
+                        
+                    days_elap = (l_date - calc_start_date).days
+                    weeks_elapsed = max(0.1, days_elap / 7)
+                    
+                    days_rem = (fy_end - l_date).days
+                    weeks_remaining = max(0.1, days_rem / 7)
+                    
+                    # 2. ARRS Projection (Respecting Data Lag)
+                    # Project from arrs_month till FY end
+                    if isinstance(arrs_end_date, pd.Timestamp):
+                        a_end = arrs_end_date.date()
                     else:
-                        st.badge(f"< 75% Access Payment", color='orange')
+                        a_end = arrs_end_date
+                        
+                    days_from_arrs_to_end = (fy_end - a_end).days
+                    weeks_from_arrs_to_end = max(0, days_from_arrs_to_end / 7)
+                    projected_future_arrs = estimated_weekly_arrs * weeks_from_arrs_to_end if 'estimated_weekly_arrs' in locals() else 0
+                    
+                    # 3. Surgery Baseline Projection
+                    # Calculate average weekly surgery appointments from historical data
+                    avg_weekly_surgery = len(filtered_df) / weeks_elapsed
+                    projected_surgery_baseline = avg_weekly_surgery * weeks_remaining
+                    
+                    # 4. Annual Target (85 per 1000 per week for 52.14 weeks)
+                    annual_target_total = 85 * (list_size / 1000) * 52.14
+                    
+                    # 5. Total Baseline Projection (Achieved + Future Baseline + Future ARRS)
+                    # We assume ARRS continues at the estimated rate for the remainder of the year
+                    achieved_so_far = len(filtered_df) + arrs_2526
+                    total_baseline_projection = achieved_so_far + projected_surgery_baseline + projected_future_arrs
+                    
+                    # 6. Gap to close
+                    gap = annual_target_total - total_baseline_projection
+                    
+                    # 7. Required additional per week (only for remaining period)
+                    required_extra_per_week = gap / weeks_remaining if weeks_remaining > 0 else 0
+                    
+                    with st.expander("Target Achievement Calculator (FY 25-26)", icon=":material/calculate:", expanded=False):
+                        st.subheader(":material/calculate: Target Achievement Calculator")
+                        
+                        c1, c2, c3 = st.columns(3)
+                        with c1:
+                            st.metric("Annual Target Total", f"{annual_target_total:.0f}")
+                            st.caption("85 apps/1000/week")
+                        with c2:
+                            st.metric("Baseline Projection", f"{total_baseline_projection:.0f}")
+                            st.caption("Historical Avg + ARRS")
+                        with c3:
+                            color = "normal" if gap <= 0 else "inverse"
+                            st.metric("Gap to Target", f"{max(0, gap):.0f}", delta=f"{gap:.0f}", delta_color=color)
+                            st.caption("Extra apps needed")
+                            
+                        if gap > 0:
+                            st.warning(f"📈 To reach the annual target, you need to add **{required_extra_per_week:.1f}** additional appointments per week for the remaining **{weeks_remaining:.1f}** weeks.")
+                            st.info(f"💡 Set the **Experiment Slider** to **{required_extra_per_week:.0f}** to see the impact of adding these appointments.")
+                        else:
+                            st.success(f"✅ Based on your current average, you are on track to hit the annual target!")
+
+                        # 8. Visual Projection Chart
+                        st.divider()
+                        st.markdown("#### :material/bar_chart: Annual Projection (Weekly)")
+                        
+                        # Create projection dataframe
+                        # Historical part
+                        proj_df = weekly_agg[['week', 'total_appointments']].copy()
+                        proj_df['type'] = 'Historical'
+                        # ARRS is applied to historical data only if it's within the ARRS period
+                        # But for projection, we show the average ARRS contribution
+                        proj_df['ARRS'] = arrs_2526 / weeks_elapsed
+                        proj_df['Added (Exp)'] = 0
+                        proj_df['Catch-up Needed'] = 0
+                        
+                        # Future part
+                        # Fix gap: Start from the next week after the last historical week
+                        last_historical_week = weekly_agg['week'].max()
+                        future_weeks_list = pd.date_range(
+                            start=last_historical_week + pd.Timedelta(weeks=1),
+                            end=pd.Timestamp(fy_end),
+                            freq='W-MON'
+                        )
+                        
+                        future_data = []
+                        for w in future_weeks_list:
+                            # The green gap should be reduced by the experimental slider
+                            # required_extra_per_week is the TOTAL extra needed per week
+                            # exp_add_apps_per_week is what the user is simulating adding
+                            remaining_gap = max(0, required_extra_per_week - exp_add_apps_per_week)
+                            
+                            future_data.append({
+                                'week': w,
+                                'total_appointments': avg_weekly_surgery,
+                                'type': 'Projected Baseline',
+                                'ARRS': estimated_weekly_arrs,
+                                'Added (Exp)': exp_add_apps_per_week,
+                                'Catch-up Needed': remaining_gap
+                            })
+                        
+                        if future_data:
+                            future_df = pd.DataFrame(future_data)
+                            combined_proj_df = pd.concat([proj_df, future_df], ignore_index=True)
+                            
+                            fig_proj = px.bar(
+                                combined_proj_df,
+                                x='week',
+                                y=['total_appointments', 'Added (Exp)', 'ARRS', 'Catch-up Needed'],
+                                title="Weekly Trajectory to Target",
+                                labels={'value': 'Appointments', 'variable': 'Component'},
+                                color_discrete_map={
+                                    'total_appointments': '#0077b6',
+                                    'Added (Exp)': '#00b4d8', # Lighter blue for added apps
+                                    'ARRS': '#f48c06',
+                                    'Catch-up Needed': '#6a994e'
+                                },
+                                height=400
+                            )
+                            
+                            # Add threshold line
+                            weekly_threshold = 85 * (list_size / 1000)
+                            fig_proj.add_hline(
+                                y=weekly_threshold,
+                                line_dash='dot',
+                                line_color='#c1121f',
+                                annotation_text="Weekly Target"
+                            )
+                            
+                            st.plotly_chart(fig_proj, use_container_width=True)
 
 
 
@@ -602,26 +897,26 @@ if uploaded_files:
 
 
         # Show file information
-        with st.expander("File & Debug Information", icon=":material/info:"):
+        with st.expander("Debug Information", icon=":material/bug_report:"):
             # ===== DATA STATISTICS SECTION =====
-            st.markdown("### :material/info: Data Statistics")
+            st.markdown("#### :material/bug_report: Data Statistics")
             col1, col2, col3, col4 = st.columns(4)
             with col1:
-                st.badge(f":material/folder: Original Rows: {len(combined_df)}", color="blue")
+                st.markdown(f"**Original Rows:** :orange[{len(combined_df)}]")
             with col2:
                 if 'filtered_df' in locals():
-                    st.badge(f":material/search: Filtered Rows: {len(filtered_df)}", color="violet")
+                    st.markdown(f"**Filtered Rows:** :orange[{len(filtered_df)}]")
                 else:
-                    st.badge(f":material/search: Filtered Rows: N/A", color="gray")
+                    st.markdown(f"**Filtered Rows:** :orange[N/A]")
             with col3:
-                st.badge(f":material/table: Columns: {len(combined_df.columns)}", color="blue")
+                st.markdown(f"**Columns:** :orange[{len(combined_df.columns)}]")
             with col4:
-                st.badge(f":material/folder: Files Loaded: {len(file_names)}", color="blue")
+                st.markdown(f"**Files Loaded:** :orange[{len(file_names)}]")
             
             # File details with dates
+            st.markdown("---")
             st.markdown("**File Details:**")
             total_loaded = 0
-            file_cols = st.columns(min(3, len(file_names)) if len(file_names) > 0 else 1)
             for i, name in enumerate(file_names):
                 df_rows = len(dataframes[i])
                 total_loaded += df_rows
@@ -631,91 +926,84 @@ if uploaded_files:
                     file_max = pd.to_datetime(dataframes[i]['appointment_date'], format='%d-%b-%y', errors='coerce').max()
                     if pd.notna(file_min) and pd.notna(file_max):
                         date_range_str = f"{file_min.strftime('%d %b %y')} → {file_max.strftime('%d %b %y')}"
-                        with file_cols[i % len(file_cols)]:
-                            st.badge(f"'{name}': {df_rows} rows | {date_range_str}", color="blue")
+                        st.markdown(f"- `{name}`: :orange[{df_rows}] rows | {date_range_str}")
                     else:
-                        with file_cols[i % len(file_cols)]:
-                            st.badge(f"'{name}': {df_rows} rows | :material/error: Date parsing failed", color="orange")
+                        st.markdown(f"- `{name}`: :orange[{df_rows}] rows | :material/error: Date parsing failed")
                 else:
-                    with file_cols[i % len(file_cols)]:
-                        st.badge(f"'{name}': {df_rows} rows", color="blue")
+                    st.markdown(f"- `{name}`: :orange[{df_rows}] rows")
             
-            col1, col2 = st.columns(2)
-            with col1:
-                st.badge(f":material/check_circle: Total Loaded: {total_loaded}", color="green")
-            with col2:
-                st.badge(f":material/check_circle: After Cleaning: {len(combined_df)}", color="green")
+            st.markdown(f"**Total Loaded:** :orange[{total_loaded}] | **After Cleaning:** :orange[{len(combined_df)}]")
             
             st.divider()
             
             # ===== INPUT CONFIGURATION SECTION =====
-            st.markdown("### :material/settings: Input Configuration")
+            st.markdown("#### :material/settings: Input Configuration")
             col1, col2, col3, col4 = st.columns(4)
             with col1:
-                st.badge(f":material/menu: List Size: {list_size}", color="green")
+                st.markdown(f"**List Size:** :orange[{list_size}]")
             with col2:
-                st.badge(f":material/star: ARRS Entered: {arrs_2526}", color="green")
+                st.markdown(f"**ARRS Entered:** :orange[{arrs_2526}]")
             with col3:
-                status_text = ":material/check: Yes" if arrs_future else ":material/close: No"
-                st.badge(f":material/star: Future ARRS: {status_text}", color="green")
+                status_text = "Yes" if arrs_future else "No"
+                st.markdown(f"**Future ARRS:** :orange[{status_text}]")
             with col4:
-                status_text = ":material/check: Yes" if exclude_did_not_attend else ":material/close: No"
-                st.badge(f":material/close: Exclude DNAs: {status_text}", color="green")
+                status_text = "Yes" if exclude_did_not_attend else "No"
+                st.markdown(f"**Exclude DNAs:** :orange[{status_text}]")
             
             st.divider()
             
             # ===== DATE RANGE SECTION =====
-            st.markdown("### :material/calendar_check: Date Range")
+            st.markdown("#### :material/calendar_check: Date Range")
             col1, col2, col3, col4 = st.columns(4)
             with col1:
-                st.badge(f":material/play_arrow: Slider Start: {date_range[0]}", color="orange")
+                st.markdown(f"**Slider Start:** :orange[{date_range[0]}]")
             with col2:
-                st.badge(f":material/close: Slider End: {slider_end_date}", color="orange")
+                st.markdown(f"**Slider End:** :orange[{slider_end_date}]")
             with col3:
-                st.badge(f":material/calendar_check: Data Start: {filtered_df['appointment_date'].min().date()}", color="orange")
+                st.markdown(f"**Data Start:** :orange[{filtered_df['appointment_date'].min().date()}]")
             with col4:
-                st.badge(f":material/calendar_check: Data End: {filtered_end_date}", color="orange")
+                st.markdown(f"**Data End:** :orange[{filtered_end_date}]")
             
             st.divider()
             
             # ===== APPOINTMENT COUNTS SECTION =====
-            st.markdown("### :material/call: Appointment Counts")
+            st.markdown("#### :material/call: Appointment Counts")
             col1, col2, col3, col4 = st.columns(4)
             with col1:
-                st.badge(f":material/search: Filtered Apps: {len(filtered_df)}", color="blue")
+                st.markdown(f"**Filtered Apps:** :orange[{len(filtered_df)}]")
             with col2:
-                st.badge(f":material/star: ARRS Applied: {arrs_2526}", color="blue")
+                st.markdown(f"**ARRS Applied:** :orange[{arrs_2526}]")
             with col3:
-                st.badge(f":material/star: Future ARRS Est: {future_arrs_apps}", color="blue")
+                st.markdown(f"**Future ARRS Est:** :orange[{future_arrs_apps}]")
             with col4:
-                st.badge(f":material/add: Total + ARRS: {total_apps_arrs}", color="blue")
+                st.markdown(f"**Total + ARRS:** :orange[{total_apps_arrs}]")
             
             st.divider()
             
             # ===== TIME CALCULATION SECTION =====
-            st.markdown("### :material/schedule: Time Calculations")
+            st.markdown("#### :material/schedule: Time Calculations")
             col1, col2, col3 = st.columns(3)
             with col1:
-                st.badge(f":material/calendar_check: Days in Range: {time_diff}", color="violet")
+                st.markdown(f"**Days in Range:** :orange[{time_diff}]")
             with col2:
-                st.badge(f":material/calendar_check: Weeks: {weeks:.2f}", color="violet")
+                st.markdown(f"**Weeks:** :orange[{weeks:.2f}]")
             with col3:
-                st.badge(f":material/calendar_check: Months: {months:.1f}", color="violet")
+                st.markdown(f"**Months:** :orange[{months:.1f}]")
             
             st.divider()
             
             # ===== FINAL CALCULATION SECTION =====
-            st.markdown("### :material/edit: Final Calculation")
-            st.badge(f"Formula: ({total_apps_arrs} ÷ {list_size}) × 1000 ÷ {weeks:.2f} = {av_1000_week:.2f} apps per 1000 per week", color="red")
+            st.markdown("#### :material/edit: Final Calculation")
+            st.markdown(f"**Formula:** `({total_apps_arrs} ÷ {list_size}) × 1000 ÷ {weeks:.2f}` = :orange[{av_1000_week:.2f}] apps per 1000 per week")
             
             # Visual breakdown
             col1, col2, col3 = st.columns(3)
             with col1:
-                st.badge(f":material/add: Total Apps: {total_apps_arrs}", color="red")
+                st.markdown(f"**Total Apps:** :orange[{total_apps_arrs}]")
             with col2:
-                st.badge(f":material/menu: List Size: {list_size}", color="red")
+                st.markdown(f"**List Size:** :orange[{list_size}]")
             with col3:
-                st.badge(f":material/edit: Result: {av_1000_week:.2f}", color="red")
+                st.markdown(f"**Result:** :orange[{av_1000_week:.2f}]")
 
         # Download combined CSV
         csv = combined_df.to_csv(index=False)
