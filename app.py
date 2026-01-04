@@ -19,6 +19,15 @@ with st.sidebar:
         help="Select one or more CSV files to combine"
     )
     drop_duplicates = st.toggle("Drop Duplicate Entries", value=True)
+    exclude_did_not_attend = st.toggle(
+        "Exclude 'Did Not Attend'",
+        value=True,
+        help="Filter out appointments with **'Did Not Attend'** status"
+    )
+    if exclude_did_not_attend:
+        st.info(":material/done_outline: 'Did Not Attend' appointments excluded.")
+    else:
+        st.error("⚠️ Remove 'Did Not Attend' appointments, for accurate calculations.")
     st.divider()
     st.subheader("Scatter Plot Options")
     plot_view_option = st.radio(
@@ -27,23 +36,13 @@ with st.sidebar:
         index=0,
         help="Choose which columns to use for the scatter plot axes and color"
     )
-
-
-    st.divider()
     
-    st.subheader(("'Did Not Attend'"))
-    exclude_did_not_attend = st.checkbox(
-        "Exclude 'Did Not Attend'",
-        value=True,
-        help="Filter out appointments with **'Did Not Attend'** status"
-    )
 
-    if exclude_did_not_attend:
-        st.info(":material/done_outline: 'Did Not Attend' appointments excluded.")
-    else:
-        st.error("⚠️ Remove 'Did Not Attend' appointments, for accurate calculations.")
-        
+
+
+
     st.divider()
+
     
     st.subheader("Weighted List Size")   
     list_size = st.number_input(
@@ -88,11 +87,13 @@ with st.sidebar:
 
         arrs_end_date = arrs_month_map[arrs_month]
         arrs_start_date = date(2025, 4, 1)
-        arrs_weeks_span = (arrs_end_date - arrs_start_date).days / 7
+        arrs_weeks_span = max(0.1, (arrs_end_date - arrs_start_date).days / 7)
+        
+        # Always calculate estimated weekly ARRS if we have data
+        estimated_weekly_arrs = arrs_2526 / arrs_weeks_span
 
         arrs_future = st.checkbox('Estimate Future ARRS?', value=False, help="Estimate future ARRS based on current weekly rate")
         if arrs_future:
-            estimated_weekly_arrs = arrs_2526 / arrs_weeks_span
             st.info(f":material/done_outline: Future ARRS estimation at **{estimated_weekly_arrs:.0f}** ARRS apps per week - or **{estimated_weekly_arrs/list_size*1000:.2f}** ARRS apps per 1000 per week")
         else:
             st.error(f"⚠️ ARRS **will not be applied** to future months! Your Average Apps per 1000 per week will be underestimated.")
@@ -492,7 +493,7 @@ if uploaded_files:
                             line=dict(dash='solid', color='#f48c06'),
                             text=weekly_agg_plot['per_1000_with_arrs'].round(2),
                             textposition='top center',
-                            textfont=dict(size=10)
+                            textfont=dict(size=9)
                         )
 
                         # Add threshold line to weekly plot
@@ -683,7 +684,9 @@ if uploaded_files:
                 total_surgery_apps = len(filtered_df)
                 total_apps_arrs = total_surgery_apps + (arrs_2526 + future_arrs_apps if should_apply_arrs else 0)
 
-                av_1000_week = (total_apps_arrs / list_size) * 1000 / weeks if weeks > 0 else 0
+                # Prevent ZeroDivisionError
+                safe_weeks = max(0.1, weeks)
+                av_1000_week = (total_apps_arrs / list_size) * 1000 / safe_weeks
 
                 # Display dynamic statistics based on filtered data
                 with st.expander("**Data Statistics**", icon=":material/database:", expanded=True):
@@ -705,7 +708,7 @@ if uploaded_files:
                     end_date = filtered_df['appointment_date'].max().strftime('%d %b %y')
                     with col1:
                         st.metric("Total Surgery Appointments", total_surgery_apps)
-                        st.badge(f"{total_surgery_apps/list_size*1000/weeks:.2f} apps per 1000 per week")
+                        st.badge(f"{total_surgery_apps/list_size*1000/safe_weeks:.2f} apps per 1000 per week")
 
                     with col2:
                         if should_apply_arrs:
@@ -750,29 +753,27 @@ if uploaded_files:
                 fy_end = date(2026, 3, 31)
                 last_data_date = filtered_df['appointment_date'].max().date()
                 
+                # Calculate days and weeks left in FY
+                days_left_in_fy = (fy_end - last_data_date).days
+                weeks_left_in_fy = max(0.0, days_left_in_fy / 7)
+
                 if last_data_date < fy_end:
                     # 1. Calculate Weeks Elapsed and Remaining
                     # Use the start of the FY or the first date in data, whichever is earlier
                     data_start_date = filtered_df['appointment_date'].min().date()
                     calc_start_date = min(fy_start, data_start_date)
                     
-                    if isinstance(last_data_date, pd.Timestamp):
-                        l_date = last_data_date.date()
-                    else:
-                        l_date = last_data_date
+                    l_date = last_data_date
                         
                     days_elap = (l_date - calc_start_date).days
                     weeks_elapsed = max(0.1, days_elap / 7)
                     
-                    days_rem = (fy_end - l_date).days
-                    weeks_remaining = max(0.1, days_rem / 7)
+                    days_rem = days_left_in_fy
+                    weeks_remaining = max(0.1, weeks_left_in_fy)
                     
                     # 2. ARRS Projection (Respecting Data Lag)
                     # Project from arrs_month till FY end
-                    if isinstance(arrs_end_date, pd.Timestamp):
-                        a_end = arrs_end_date.date()
-                    else:
-                        a_end = arrs_end_date
+                    a_end = arrs_end_date
                         
                     days_from_arrs_to_end = (fy_end - a_end).days
                     weeks_from_arrs_to_end = max(0, days_from_arrs_to_end / 7)
@@ -813,8 +814,8 @@ if uploaded_files:
                             st.caption("Extra apps needed")
                             
                         if gap > 0:
-                            st.warning(f"📈 To reach the annual target, you need to add **{required_extra_per_week:.1f}** additional appointments per week for the remaining **{weeks_remaining:.1f}** weeks.")
-                            st.info(f"💡 Set the **Experiment Slider** to **{required_extra_per_week:.0f}** to see the impact of adding these appointments.")
+                            st.warning(f":material/target: To reach the annual target, you need to add **{required_extra_per_week:.1f}** additional appointments per week (above our mean weekly surgery apps and ARRS apps) for the remaining **{weeks_remaining:.1f}** weeks.")
+                            
                         else:
                             st.success(f"✅ Based on your current average, you are on track to hit the annual target!")
 
@@ -885,7 +886,7 @@ if uploaded_files:
                                 annotation_text="Weekly Target"
                             )
                             
-                            st.plotly_chart(fig_proj, use_container_width=True)
+                            st.plotly_chart(fig_proj, width='stretch')
 
 
 
@@ -898,8 +899,11 @@ if uploaded_files:
 
         # Show file information
         with st.expander("Debug Information", icon=":material/bug_report:"):
-            # ===== DATA STATISTICS SECTION =====
-            st.markdown("#### :material/bug_report: Data Statistics")
+            if 'filtered_df' not in locals():
+                st.info("### :material/info: No Data Selected\nPlease select at least one **Clinician** and **Rota Type** to view debug information and calculations.")
+            else:
+                # ===== DATA STATISTICS SECTION =====
+                st.markdown("### :material/bug_report: Debug Info & Data Statistics")
             col1, col2, col3, col4 = st.columns(4)
             with col1:
                 st.markdown(f"**Original Rows:** :orange[{len(combined_df)}]")
@@ -956,13 +960,18 @@ if uploaded_files:
             st.markdown("#### :material/calendar_check: Date Range")
             col1, col2, col3, col4 = st.columns(4)
             with col1:
-                st.markdown(f"**Slider Start:** :orange[{date_range[0]}]")
+                # Check if date_range is defined (it's defined inside the multiselect block)
+                d_start_val = date_range[0] if 'date_range' in locals() else "N/A"
+                st.markdown(f"**Slider Start:** :orange[{d_start_val}]")
             with col2:
-                st.markdown(f"**Slider End:** :orange[{slider_end_date}]")
+                s_end_val = slider_end_date if 'slider_end_date' in locals() else "N/A"
+                st.markdown(f"**Slider End:** :orange[{s_end_val}]")
             with col3:
-                st.markdown(f"**Data Start:** :orange[{filtered_df['appointment_date'].min().date()}]")
+                d_start_data = filtered_df['appointment_date'].min().date() if 'filtered_df' in locals() else "N/A"
+                st.markdown(f"**Data Start:** :orange[{d_start_data}]")
             with col4:
-                st.markdown(f"**Data End:** :orange[{filtered_end_date}]")
+                d_end_data = filtered_end_date if 'filtered_end_date' in locals() else "N/A"
+                st.markdown(f"**Data End:** :orange[{d_end_data}]")
             
             st.divider()
             
@@ -978,6 +987,9 @@ if uploaded_files:
             with col4:
                 st.markdown(f"**Total + ARRS:** :orange[{total_apps_arrs}]")
             
+            st.markdown("**Formula for Total Apps:**")
+            st.code(f"total_apps_arrs = total_surgery_apps ({total_surgery_apps}) + arrs_2526 ({arrs_2526}) + future_arrs_apps ({future_arrs_apps}) = {total_apps_arrs}")
+
             st.divider()
             
             # ===== TIME CALCULATION SECTION =====
@@ -990,11 +1002,14 @@ if uploaded_files:
             with col3:
                 st.markdown(f"**Months:** :orange[{months:.1f}]")
             
+            st.markdown("**Formula for Weeks:**")
+            st.code(f"weeks = time_diff ({time_diff}) / 7 = {weeks:.2f}")
+
             st.divider()
             
             # ===== FINAL CALCULATION SECTION =====
             st.markdown("#### :material/edit: Final Calculation")
-            st.markdown(f"**Formula:** `({total_apps_arrs} ÷ {list_size}) × 1000 ÷ {weeks:.2f}` = :orange[{av_1000_week:.2f}] apps per 1000 per week")
+            st.markdown(f"**Formula:** `({total_apps_arrs} ÷ {list_size}) × 1000 ÷ {safe_weeks:.2f}` = :orange[{av_1000_week:.2f}] apps per 1000 per week")
             
             # Visual breakdown
             col1, col2, col3 = st.columns(3)
@@ -1005,6 +1020,27 @@ if uploaded_files:
             with col3:
                 st.markdown(f"**Result:** :orange[{av_1000_week:.2f}]")
 
+            st.markdown("**Detailed Formula:**")
+            st.code(f"av_1000_week = (total_apps_arrs ({total_apps_arrs}) / list_size ({list_size})) * 1000 / safe_weeks ({safe_weeks:.2f}) = {av_1000_week:.2f}")
+
+            st.divider()
+            
+            # ===== FUTURE PREDICTION SECTION =====
+            st.markdown("#### :material/online_prediction: Future Prediction (Target Calculator)")
+            if 'weeks_remaining' in locals():
+                st.markdown(f"**Days Left in FY:** :orange[{days_left_in_fy}]")
+                st.markdown(f"**Weeks Left in FY:** :orange[{weeks_left_in_fy:.2f}]")
+                st.markdown("**Formula for Future Baseline:**")
+                st.code(f"projected_surgery_baseline = avg_weekly_surgery ({avg_weekly_surgery:.2f}) * weeks_remaining ({weeks_remaining:.2f}) = {projected_surgery_baseline:.0f}")
+                st.markdown("**Formula for Future ARRS:**")
+                st.code(f"projected_future_arrs = estimated_weekly_arrs ({estimated_weekly_arrs:.2f}) * weeks_from_arrs_to_end ({weeks_from_arrs_to_end:.2f}) = {projected_future_arrs:.0f}")
+                st.markdown("**Total Baseline Projection:**")
+                st.code(f"total_baseline_projection = achieved_so_far ({achieved_so_far}) + projected_surgery_baseline ({projected_surgery_baseline:.0f}) + projected_future_arrs ({projected_future_arrs:.0f}) = {total_baseline_projection:.0f}")
+                st.markdown("**Gap to Target:**")
+                st.code(f"gap = annual_target_total ({annual_target_total:.0f}) - total_baseline_projection ({total_baseline_projection:.0f}) = {gap:.0f}")
+            else:
+                st.info("Target Calculator data not available (data might extend beyond FY end).")
+
         # Download combined CSV
         csv = combined_df.to_csv(index=False)
         st.download_button(
@@ -1014,4 +1050,16 @@ if uploaded_files:
             mime="text/csv"
         )
 else:
-    st.info("👈 Please upload CSV files using the sidebar to get started!")
+    st.info("""### :material/line_start_arrow:  Please upload CSV files using the sidebar to get started!  
+            Create an appointment report on SytmOne for the time period required.add(
+            
+            # Breakdown search with the following columns
+            Appointment Date  
+            Appointment Status  
+            Rota type
+            Appointment flags  
+            Clinician  
+            Appointment status  
+            Patient ID
+
+            Export as multiple searhes as SystmOne only allow and export of 30 000 rows per search.""")
