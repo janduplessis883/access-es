@@ -56,7 +56,7 @@ with st.sidebar:
     st.divider()
 
     st.header("ARRS Allocation")
-    arrs_2526 = st.number_input("Total ARRS to date.", min_value=1, value=10, step=1, help="Enter your **ARRS allocation** for the year do date and press **Enter**, Set the **date of allocation** in the select box below.")
+    arrs_2526 = st.number_input("Total ARRS to date.", min_value=0, value=0, step=1, help="Enter your **ARRS allocation** for the year to date and press **Enter**. Set the **date of allocation** in the select box below. Enter 0 if no ARRS data.")
 
     # Initialize ARRS variables
     estimated_weekly_arrs = 0.0
