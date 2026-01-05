@@ -49,7 +49,7 @@ with st.sidebar:
     list_size = st.number_input(
         "Weighted List Size",
         min_value=1,
-        value=4000,
+        value=1,
         step=1,
         help="Enter your surgery's **weighted list size**, and press **Enter**."
     )   
