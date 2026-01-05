@@ -110,6 +110,15 @@ with st.sidebar:
         help="Simulate adding more appointments per week for the REMAINING period of the financial year."
     )
     
+    exp_add_total_apps = st.slider(
+        "Experiment: Add Total Apps",
+        min_value=0,
+        max_value=5000,
+        value=0,
+        step=50,
+        help="Simulate adding total appointments to the historical data. This affects the Average apps per 1000 per week calculation."
+    )
+    
     st.divider()
 
     show_dataframe = st.checkbox(
@@ -313,7 +322,15 @@ if uploaded_files:
                     future_arrs_apps = 0
 
                 # Total Surgery Appointments (Historical ONLY)
-                total_surgery_apps = len(filtered_df)
+                total_surgery_apps = len(filtered_df) + exp_add_total_apps
+                
+                # Recalculate total_apps_arrs with experimental addition
+                if arrs_future and should_apply_arrs:
+                    total_apps_arrs = total_surgery_apps + arrs_2526 + future_arrs_apps
+                elif should_apply_arrs:
+                    total_apps_arrs = total_surgery_apps + arrs_2526
+                else:
+                    total_apps_arrs = total_surgery_apps
                 
                 # Prevent ZeroDivisionError
                 safe_weeks = max(0.1, weeks)
@@ -1002,6 +1019,52 @@ if uploaded_files:
             if clinician_stats_df:
                 final_df = pd.DataFrame(clinician_stats_df)
                 final_df = final_df.sort_values(by='Total Apps', ascending=False).reset_index(drop=True)
+                
+                
+                # Add boxp
+                
+                # Calculate dynamic height based on number of clinicians
+                boxplot_base_height = 200
+                height_per_clinician_box = 15
+                boxplot_height = boxplot_base_height + (len(selected_clinicians) * height_per_clinician_box)
+                
+                # Create horizontal boxplot
+                fig_duration_box = px.box(
+                    filtered_df_with_dna,
+                    y='clinician',
+                    x='duration',
+                    title='Appointment Duration Distribution by Clinician',
+                    labels={
+                        'clinician': 'Clinician',
+                        'duration': 'Duration (minutes)'
+                    },
+                    color='clinician',
+                    height=boxplot_height,
+                    orientation='h'
+                )
+                
+                fig_duration_box.update_layout(
+                    yaxis_title="Clinician",
+                    xaxis_title="Duration (minutes)",
+                    showlegend=False,
+                    xaxis=dict(
+                        showgrid=True,
+                        gridwidth=0.5,
+                        gridcolor='lightgray',
+                        range=[0, 400]
+                    ),
+                    yaxis=dict(
+                        showgrid=True,
+                        gridwidth=0.5,
+                        gridcolor='lightgray'
+                    )
+                )
+                
+                st.plotly_chart(fig_duration_box, use_container_width=True)
+                
+                st.caption("The boxplot shows the distribution of appointment durations: the box represents the middle 50% of durations, the line inside shows the median, and dots indicate outliers.")
+                st.divider()
+                st.markdown("#### Appointment Stats by Clinician")
                 st.dataframe(final_df, use_container_width=True, hide_index=True)
             else:
                 st.warning("No clinician data available for the selected filters.")
@@ -1013,7 +1076,7 @@ if uploaded_files:
             else:
                 # ===== DATA STATISTICS SECTION =====
                 st.markdown("### :material/bug_report: Debug Info & Data Statistics")
-            col1, col2, col3, col4 = st.columns(4)
+                col1, col2, col3, col4 = st.columns(4)
             with col1:
                 st.markdown(f"**Original Rows:** :orange[{len(combined_df)}]")
             with col2:
@@ -1048,8 +1111,8 @@ if uploaded_files:
             st.markdown(f"**Total Loaded:** :orange[{total_loaded}] | **After Cleaning:** :orange[{len(combined_df)}]")
             
             st.divider()
-            
-            # ===== INPUT CONFIGURATION SECTION =====
+                
+                # ===== INPUT CONFIGURATION SECTION =====
             st.markdown("#### :material/settings: Input Configuration")
             col1, col2, col3, col4 = st.columns(4)
             with col1:
@@ -1064,7 +1127,7 @@ if uploaded_files:
                 st.markdown(f"**Exclude DNAs:** :orange[{status_text}]")
             
             st.divider()
-            
+                
             # ===== DATE RANGE SECTION =====
             st.markdown("#### :material/calendar_check: Date Range")
             col1, col2, col3, col4 = st.columns(4)
@@ -1083,7 +1146,7 @@ if uploaded_files:
                 st.markdown(f"**Data End:** :orange[{d_end_data}]")
             
             st.divider()
-            
+                
             # ===== APPOINTMENT COUNTS SECTION =====
             st.markdown("#### :material/call: Appointment Counts")
             col1, col2, col3, col4 = st.columns(4)
@@ -1100,7 +1163,7 @@ if uploaded_files:
             st.code(f"total_apps_arrs = total_surgery_apps ({total_surgery_apps}) + arrs_2526 ({arrs_2526}) + future_arrs_apps ({future_arrs_apps}) = {total_apps_arrs}")
 
             st.divider()
-            
+                
             # ===== TIME CALCULATION SECTION =====
             st.markdown("#### :material/schedule: Time Calculations")
             col1, col2, col3 = st.columns(3)
@@ -1115,7 +1178,7 @@ if uploaded_files:
             st.code(f"weeks = time_diff ({time_diff}) / 7 = {weeks:.2f}")
 
             st.divider()
-            
+                
             # ===== FINAL CALCULATION SECTION =====
             st.markdown("#### :material/edit: Final Calculation")
             st.markdown(f"**Formula:** `({total_apps_arrs} ÷ {list_size}) × 1000 ÷ {safe_weeks:.2f}` = :orange[{av_1000_week:.2f}] apps per 1000 per week")
@@ -1133,7 +1196,7 @@ if uploaded_files:
             st.code(f"av_1000_week = (total_apps_arrs ({total_apps_arrs}) / list_size ({list_size})) * 1000 / safe_weeks ({safe_weeks:.2f}) = {av_1000_week:.2f}")
 
             st.divider()
-            
+                
             # ===== FUTURE PREDICTION SECTION =====
             st.markdown("#### :material/online_prediction: Future Prediction (Target Calculator)")
             if 'weeks_remaining' in locals():
@@ -1149,7 +1212,7 @@ if uploaded_files:
                 st.code(f"gap = annual_target_total ({annual_target_total:.0f}) - total_baseline_projection ({total_baseline_projection:.0f}) = {gap:.0f}")
             else:
                 st.info("Target Calculator data not available (data might extend beyond FY end).")
-                
+            
 
 
             
