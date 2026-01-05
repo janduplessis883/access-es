@@ -26,7 +26,7 @@ with st.sidebar:
         help="Filter out appointments with **'Did Not Attend'** status"
     )
     if exclude_did_not_attend:
-        st.info(":material/done_outline: 'Did Not Attend' appointments excluded.")
+        st.info(":material/delete: 'Did Not Attend' appointments excluded.")
     else:
         st.error("⚠️ Remove 'Did Not Attend' appointments, for accurate calculations.")
     st.divider()
@@ -122,7 +122,7 @@ with st.sidebar:
     st.divider()
 
     show_dataframe = st.checkbox(
-        ":material/table: Show Filtered Data Table",
+        ":material/table: Show DataFrame",
         value=False,
         help="Display the filtered dataframe below the scatter plot"
     )
@@ -193,10 +193,10 @@ if uploaded_files:
         # Scatter plot section
         st.subheader("Filters and Visualization")
         if drop_duplicates:
-            st.badge(f":material/done_outline:  Dropped **{combined_df.duplicated().sum()}** duplicated rows.", color='blue')
+            st.badge(f":material/delete:  Dropped **{combined_df.duplicated().sum()}** duplicate rows.", color='blue')
             combined_df = combined_df.drop_duplicates(keep='first')
         else:
-            st.badge(f"⚠️ **{combined_df.duplicated().sum()}** Duplicated rows identified.", color='blue')
+            st.badge(f"⚠️ **{combined_df.duplicated().sum()}** Duplicate rows identified.", color='blue')
 
         # Check if required columns exist
         required_cols = ['appointment_date', 'clinician', 'appointment_status', 'rota_type']
@@ -274,7 +274,7 @@ if uploaded_files:
                     filtered_df = filtered_df[filtered_df['appointment_status'] != 'Did Not Attend']
                     dna_count_excluded = dna_count_before - len(filtered_df)
                     dna_percentage = (dna_count_excluded / dna_count_before) * 100
-                    st.success(f":material/done_outline: Excluded {dna_count_excluded} 'Did Not Attend' appointments ({dna_percentage:.1f}% of total)")
+                    st.success(f":material/delete: Excluded {dna_count_excluded} 'Did Not Attend' appointments ({dna_percentage:.1f}% of total)")
 
                 # Determine if ARRS should be applied based on slider end date (not data end date)
                 # This ensures ARRS is applied if the user selects a date range that extends to the ARRS month end
@@ -778,23 +778,25 @@ if uploaded_files:
 
                 # Display filtered dataframe if checkbox is enabled
                 if show_dataframe:
-                    st.subheader(":material/table: Filtered Data Table")
-                    st.dataframe(filtered_df, width='stretch')
+                    expander_open=False
+                else:
+                    expander_open=True
+
 
                 # Display dynamic statistics based on filtered data
-                with st.expander("**Data Statistics**", icon=":material/database:", expanded=True):
+                with st.expander("**Data Statistics**", icon=":material/database:", expanded=expander_open):
                     st.subheader(":material/database: Data Statistics")
                     col1, col2 = st.columns([1,6])
                     with col1:
                         if drop_duplicates:
-                            st.badge(":material/done_outline: Duplicates dropped", color='green')
+                            st.badge(":material/delete: Duplicates dropped", color='green')
                   
                         else:
                             st.badge("⚠️ Duplicate entries", color='yellow')
             
                     with col2:
                         if exclude_did_not_attend:
-                            st.badge(":material/done_outline: Excluding 'Did Not Attend'", color='green')
+                            st.badge(":material/delete: Excluding 'Did Not Attend'", color='green')
                         else:
                             st.badge("⚠️ Includes 'Did Not Attend'", color='yellow')  
 
@@ -1051,7 +1053,7 @@ if uploaded_files:
                         showgrid=True,
                         gridwidth=0.5,
                         gridcolor='lightgray',
-                        range=[0, 400]
+                        range=[0, 150]
                     ),
                     yaxis=dict(
                         showgrid=True,
@@ -1070,7 +1072,11 @@ if uploaded_files:
                 st.warning("No clinician data available for the selected filters.")
 
         # Show file information
-        with st.expander("Debug Information", icon=":material/bug_report:"):
+        if show_dataframe:
+            expander_open = True
+        else:
+            expander_open = False
+        with st.expander("Debug Information", icon=":material/bug_report:", expanded=expander_open):
             if 'filtered_df' not in locals():
                 st.info("### :material/info: No Data Selected\nPlease select at least one **Clinician** and **Rota Type** to view debug information and calculations.")
             else:
@@ -1213,7 +1219,18 @@ if uploaded_files:
             else:
                 st.info("Target Calculator data not available (data might extend beyond FY end).")
             
-
+            
+            if show_dataframe:
+                st.divider()
+                st.markdown("#### Dataframes")
+                st.write("**filtered_df**")
+                st.dataframe(filtered_df, width='stretch')
+                st.write("**weekly_agg**")
+                st.dataframe(weekly_agg, width='stretch')
+                st.write("**monthly_agg**")
+                st.dataframe(monthly_agg, width='stretch')   
+                st.caption('Access ES Tracker')
+            
 
             
 
@@ -1225,16 +1242,19 @@ if uploaded_files:
             file_name="combined_data.csv",
             mime="text/csv"
         )
+
 else:
     st.info("""### :material/line_start_arrow:  Please upload CSV files using the sidebar to get started!""")
     st.info("""Create an **appointment report** in clincal reporting on SytmOne for the time period required. **Breakdown** search with the following columns:  
             
             - Appointment Date  
+            - Appointment duration (actual)
             - Appointment Status  
             - Rota type
             - Appointment flags  
             - Clinician  
-            - Appointment status  
+            - Appointment status 
+            - Time between booking and appointment 
             - Patient ID  
             
 Export as multiple searhes (incrementing date with each) as SystmOne only allow and export of 30 000 rows per search.  
