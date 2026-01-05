@@ -3,12 +3,13 @@ import pandas as pd
 import plotly.express as px
 import io
 from datetime import date
+import numpy as np
 
-st.set_page_config(page_title=":material/switch_access_shortcut_add: Access ES Tracker", layout="wide")
+st.set_page_config(page_title="Access ES - Appointment Tracker", layout="wide", page_icon=":material/switch_access_shortcut_add:")
 
-st.title(":material/switch_access_shortcut_add: Access ES Tracker")
-st.caption("Check your :material/switch_access_shortcut_add: Access ES appointment provision.")
-
+st.title(":material/switch_access_shortcut_add: Access ES - Appointment Tracker")
+st.caption("Check your **:material/switch_access_shortcut_add: Access ES** appointment provision. To ensure accurate results complete all the **settings** in the **sidebar**. Especiaqlly ARRS up to the date this value has been supplied by the ICB.")
+st.logo("logo.png", size="small")
 # Sidebar for file uploads
 with st.sidebar:
     st.title(":material/settings: Settings")
@@ -46,7 +47,7 @@ with st.sidebar:
     
     st.subheader("Weighted List Size")   
     list_size = st.number_input(
-        "List Size",
+        "Weighted List Size",
         min_value=1,
         value=4000,
         step=1,
@@ -62,18 +63,18 @@ with st.sidebar:
     
     # Map month selections to end of month dates
     arrs_month_map = {
-        "April 25": date(2025, 4, 30),
-        "May 25": date(2025, 5, 31),
-        "June 25": date(2025, 6, 30),
-        "July 25": date(2025, 7, 31),
-        "August 25": date(2025, 8, 31),
-        "September 25": date(2025, 9, 30),
-        "October 25": date(2025, 10, 31),
-        "November 25": date(2025, 11, 30),
-        "December 25": date(2025, 12, 31),
-        "January 26": date(2026, 1, 31),
-        "February 26": date(2026, 2, 28),
-        "March 26": date(2026, 3, 31)
+        "April 25": pd.Timestamp(2025, 4, 30),
+        "May 25": pd.Timestamp(2025, 5, 31),
+        "June 25": pd.Timestamp(2025, 6, 30),
+        "July 25": pd.Timestamp(2025, 7, 31),
+        "August 25": pd.Timestamp(2025, 8, 31),
+        "September 25": pd.Timestamp(2025, 9, 30),
+        "October 25": pd.Timestamp(2025, 10, 31),
+        "November 25": pd.Timestamp(2025, 11, 30),
+        "December 25": pd.Timestamp(2025, 12, 31),
+        "January 26": pd.Timestamp(2026, 1, 31),
+        "February 26": pd.Timestamp(2026, 2, 28),
+        "March 26": pd.Timestamp(2026, 3, 31)
     }
 
     if arrs_2526 == 0:
@@ -86,13 +87,13 @@ with st.sidebar:
             "April 25", "May 25", "June 25", "July 25", "August 25", "September 25", "October 25", "November 25", "December 25", "January 26", "February 26", "March 26"], index=0, help="Select the month corresponding to the ARRS input.")
 
         arrs_end_date = arrs_month_map[arrs_month]
-        arrs_start_date = date(2025, 4, 1)
+        arrs_start_date = pd.Timestamp(2025, 4, 1)
         arrs_weeks_span = max(0.1, (arrs_end_date - arrs_start_date).days / 7)
         
         # Always calculate estimated weekly ARRS if we have data
         estimated_weekly_arrs = arrs_2526 / arrs_weeks_span
 
-        arrs_future = st.checkbox('Estimate Future ARRS?', value=False, help="Estimate future ARRS based on current weekly rate")
+        arrs_future = st.toggle('Apply estimated future ARRS?', value=False, help="Estimate future ARRS based on current weekly rate")
         if arrs_future:
             st.info(f":material/done_outline: Future ARRS estimation at **{estimated_weekly_arrs:.0f}** ARRS apps per week - or **{estimated_weekly_arrs/list_size*1000:.2f}** ARRS apps per 1000 per week")
         else:
@@ -138,7 +139,8 @@ if uploaded_files:
 
         # Process column names: lowercase and replace spaces with underscores
         combined_df.columns = combined_df.columns.str.lower().str.replace(' ', '_')
-
+        combined_df.columns = combined_df.columns.str.strip()
+        combined_df.rename(columns={'appointment_duration_(actual)': 'duration', 'time_between_booking_and_appointment': 'book_to_app'}, inplace=True)
         # Convert appointment_date column to datetime if it exists
         if 'appointment_date' in combined_df.columns:
             try:
@@ -163,6 +165,22 @@ if uploaded_files:
             # Sort by appointment date
             combined_df = combined_df.sort_values('appointment_date').reset_index(drop=True)
 
+            # 1. Use regex to extract numeric values for hours and minutes
+            # This pattern looks for digits followed by 'h' and digits followed by 'm'
+            extracted = combined_df['duration'].str.extract(r'(?:(?P<hours>\d+)h)?\s?(?:(?P<minutes>\d+)m)?')
+            # 2. Convert the extracted strings to numeric (filling missing values with 0)
+            hours = pd.to_numeric(extracted['hours']).fillna(0)
+            minutes = pd.to_numeric(extracted['minutes']).fillna(0)
+            # 3. Calculate total minutes and assign to a new column
+            combined_df['duration'] = (hours * 60) + minutes
+            
+            extracted = combined_df['book_to_app'].str.extract(r'(?:(?P<hours>\d+)h)?\s?(?:(?P<minutes>\d+)m)?')
+            # 2. Convert the extracted strings to numeric (filling missing values with 0)
+            hours = pd.to_numeric(extracted['hours']).fillna(0)
+            minutes = pd.to_numeric(extracted['minutes']).fillna(0)
+            # 3. Calculate total minutes and assign to a new column
+            combined_df['book_to_app'] = (hours * 60) + minutes
+            
         # Scatter plot section
         st.subheader("Filters and Visualization")
         if drop_duplicates:
@@ -238,6 +256,9 @@ if uploaded_files:
                     (filtered_df['appointment_date'].dt.date <= date_range[1])
                 ]
 
+                # Store filtered_df BEFORE DNA exclusion for clinician stats
+                filtered_df_with_dna = filtered_df.copy()
+
                 # Apply exclude_did_not_attend filter BEFORE creating weekly and monthly aggregations
                 dna_count_before = len(filtered_df)
                 if exclude_did_not_attend:
@@ -250,33 +271,118 @@ if uploaded_files:
                 # This ensures ARRS is applied if the user selects a date range that extends to the ARRS month end
                 slider_end_raw = date_range[1]
                 if isinstance(slider_end_raw, int):
-                    slider_end_date = date.fromordinal(slider_end_raw)
+                    slider_end_date = pd.Timestamp.fromordinal(slider_end_raw)
                 else:
-                    slider_end_date = date(slider_end_raw.year, slider_end_raw.month, slider_end_raw.day)
+                    slider_end_date = pd.Timestamp(slider_end_raw.year, slider_end_raw.month, slider_end_raw.day)
                 should_apply_arrs = slider_end_date >= arrs_end_date and arrs_2526 > 0
 
                 # Store the actual data end date for time range calculations
-                filtered_end_date = filtered_df['appointment_date'].max().date()
+                filtered_end_date = filtered_df['appointment_date'].max()
+                
+                # Calculate time_diff based on SLIDER range, not data range
+                # This ensures the denominator (weeks) correctly reflects the period selected by the user,
+                # even if there are gaps in the data (e.g. no appointments on weekends or holidays).
+                d_start = pd.Timestamp(date_range[0])
+                d_end = pd.Timestamp(date_range[1])
+                    
+                time_diff = (d_end - d_start).days
+                weeks = time_diff / 7
+                months = time_diff / 30.44
 
+                if arrs_future and should_apply_arrs:
+                    # Calculate weeks from ARRS end date to slider end date for future estimation
+                    if isinstance(slider_end_date, pd.Timestamp):
+                        s_end = slider_end_date
+                    else:
+                        s_end = pd.Timestamp(slider_end_date)
+                    
+                    if isinstance(arrs_end_date, pd.Timestamp):
+                        a_end = arrs_end_date
+                    else:
+                        a_end = pd.Timestamp(arrs_end_date)
+                        
+                    days_fut = (s_end - a_end).days
+                    future_weeks = days_fut / 7
+                    future_arrs_apps = int(round(estimated_weekly_arrs * future_weeks, 0)) if future_weeks > 0 else 0
+                    total_apps_arrs = len(filtered_df) + arrs_2526 + future_arrs_apps
+                elif should_apply_arrs:
+                    total_apps_arrs = len(filtered_df) + arrs_2526
+                    future_arrs_apps = 0
+                else:
+                    total_apps_arrs = len(filtered_df)
+                    future_arrs_apps = 0
+
+                # Total Surgery Appointments (Historical ONLY)
+                total_surgery_apps = len(filtered_df)
+                
+                # Prevent ZeroDivisionError
+                safe_weeks = max(0.1, weeks)
+                av_1000_week = (total_apps_arrs / list_size) * 1000 / safe_weeks
                 # Create weekly aggregation for all appointments in filtered dataframe
+                cutoff_date = arrs_month_map[arrs_month]
+                
+                
                 weekly_df = filtered_df.copy()
                 weekly_df['week'] = weekly_df['appointment_date'].dt.to_period('W').dt.start_time
                 weekly_agg = weekly_df.groupby('week').size().reset_index(name='total_appointments')
                 
                 weekly_agg['per_1000'] = weekly_agg['total_appointments']/list_size*1000
                 # ARRS applied as flat rate across all weeks
-                weekly_agg['arrs_only'] = estimated_weekly_arrs
-                weekly_agg['total_with_arrs'] = weekly_agg['total_appointments'] + estimated_weekly_arrs
-                weekly_agg['per_1000_with_arrs'] = weekly_agg['per_1000'] + (estimated_weekly_arrs/list_size*1000)
+                weeks_after_cutoff = weekly_agg[weekly_agg['week'] >= cutoff_date].shape[0]
+                
+                if arrs_future and weeks_after_cutoff > 0:
+                    # Distribute the predicted value across the remaining weeks
+                    post_cutoff_increment = future_arrs_apps / weeks_after_cutoff
+                else:
+                    post_cutoff_increment = 0
+                
+                # Apply ARRS: estimated_weekly_arrs before cutoff, post_cutoff_increment after cutoff
+                # Split into two columns for different colors in the chart
+                weekly_agg['arrs_historical'] = np.where(
+                    weekly_agg['week'] < cutoff_date, 
+                    estimated_weekly_arrs, 
+                    0
+                )
+                weekly_agg['arrs_future'] = np.where(
+                    weekly_agg['week'] >= cutoff_date, 
+                    post_cutoff_increment, 
+                    0
+                )
+                weekly_agg['arrs_only'] = weekly_agg['arrs_historical'] + weekly_agg['arrs_future']
+                weekly_agg['total_with_arrs'] = weekly_agg['total_appointments'] + weekly_agg['arrs_only']
+                weekly_agg['per_1000_with_arrs'] = weekly_agg['per_1000'] + (weekly_agg['arrs_only']/list_size*1000)
+
+                
                 
                 # Create monthly aggregation for all appointments in filtered dataframe
                 monthly_df = filtered_df.copy()
                 monthly_df['month'] = monthly_df['appointment_date'].dt.to_period('M').dt.start_time
                 monthly_agg = monthly_df.groupby('month').size().reset_index(name='total_appointments')
-                # Add monthly ARRS estimate (approximately 4.345 weeks per month)
-                monthly_agg['total_arrs_estimated'] = estimated_weekly_arrs * 4.345
-                monthly_agg['total_with_arrs'] = monthly_agg['total_appointments'] + monthly_agg['total_arrs_estimated']
                 
+                # Calculate months after cutoff for future ARRS distribution
+                months_after_cutoff = monthly_agg[monthly_agg['month'] >= cutoff_date].shape[0]
+                
+                if arrs_future and months_after_cutoff > 0:
+                    # Distribute future ARRS across remaining months
+                    monthly_post_cutoff_increment = future_arrs_apps / months_after_cutoff
+                else:
+                    monthly_post_cutoff_increment = 0
+                
+                # Add monthly ARRS estimate (approximately 4.345 weeks per month before cutoff, distributed future ARRS after)
+                # Split into two columns for different colors in the chart
+                monthly_agg['arrs_historical'] = np.where(
+                    monthly_agg['month'] < cutoff_date, 
+                    (estimated_weekly_arrs * 4.345), 
+                    0
+                )
+                monthly_agg['arrs_future'] = np.where(
+                    monthly_agg['month'] >= cutoff_date, 
+                    monthly_post_cutoff_increment, 
+                    0
+                )
+                monthly_agg['total_arrs_estimated'] = monthly_agg['arrs_historical'] + monthly_agg['arrs_future']
+                monthly_agg['total_with_arrs'] = monthly_agg['total_appointments'] + monthly_agg['total_arrs_estimated']
+
                 # Calculate dynamic height based on number of clinicians
                 base_height = 300
                 height_per_clinician = 15
@@ -369,24 +475,26 @@ if uploaded_files:
                         hovermode='closest',
                         xaxis=dict(
                             showgrid=True,
-                            gridwidth=1,
+                            gridwidth=0.5,
                             gridcolor='lightgray'
                         ),
                         yaxis=dict(
                             showgrid=True,
-                            gridwidth=1,
+                            gridwidth=0.5,
                             gridcolor='lightgray'
                         )
                     )
 
                     st.plotly_chart(fig, width='stretch')
-
+                    st.info(f"Avarage Appointment length: **{filtered_df['duration'].mean():.2f} minutes** (Across all clinics selected above) Max: {filtered_df['duration'].max():.2f} minutes Min: {filtered_df['duration'].min():.2f} minutes")
+                    st.info(f"Average Time from Booking till Appointment: **{filtered_df['book_to_app'].mean():.2f} minutes** (Across all clinics selected above) Max: {filtered_df['book_to_app'].max():.2f} minutes Min: {filtered_df['book_to_app'].min():.2f} minutes")
+                    
                 # Weekly & Monthly Trends
                 with st.expander("Visualizations - Weekly & Monthly Trends", icon=":material/bar_chart:", expanded=False):
                     st.subheader(":material/bar_chart: Weekly & Monthly Trends")
 
                     # Calculate time range for calculations
-                    time_diff_days = (date_range[1] - date_range[0]).days
+                    time_diff_days = (pd.Timestamp(date_range[1]) - pd.Timestamp(date_range[0])).days
                     months_calc = time_diff_days / 30.4
 
                     # Toggle for weekly view options
@@ -415,11 +523,11 @@ if uploaded_files:
 
                         
                     if not show_per_1000:
-                        # Bar chart for total appointments
+                        # Bar chart for total appointments with split ARRS colors
                         fig_weekly = px.bar(
                             weekly_agg_plot,
                             x='week',
-                            y=[y_plot, 'arrs_only'],
+                            y=[y_plot, 'arrs_historical', 'arrs_future'],
                             title=plot_select_title,
                             labels={
                                 'week': 'Week Starting Date',
@@ -429,26 +537,32 @@ if uploaded_files:
                             height=500,
                             color_discrete_map={
                                 y_plot: '#0077b6',
-                                'arrs_only': '#f48c06'
+                                'arrs_historical': '#f48c06',
+                                'arrs_future': '#cb3f4e'
                             }
                         )
                         
                         # Add custom text labels
                         # Blue segment: Actual value
-                        # Orange segment: Total value
+                        # Orange/lighter orange segments: Show total on top segment
                         fig_weekly.update_traces(
                             selector=dict(name=y_plot),
                             text=weekly_agg_plot[y_plot],
                             textposition='inside'
                         )
                         fig_weekly.update_traces(
-                            selector=dict(name='arrs_only'),
+                            selector=dict(name='arrs_historical'),
+                            text=weekly_agg_plot['arrs_historical'].round(0),
+                            textposition='inside'
+                        )
+                        fig_weekly.update_traces(
+                            selector=dict(name='arrs_future'),
                             text=weekly_agg_plot['total_with_arrs'].round(0),
                             textposition='inside'
                         )
                         
                         # Update legend names
-                        newnames = {y_plot: 'Actual Appointments', 'arrs_only': 'Estimated ARRS'}
+                        newnames = {y_plot: 'Actual Appointments', 'arrs_historical': 'ARRS (Historical)', 'arrs_future': 'ARRS (Future Est)'}
                         fig_weekly.for_each_trace(lambda t: t.update(name = newnames.get(t.name, t.name)))
 
                         # Add threshold line to weekly bar plot
@@ -456,6 +570,7 @@ if uploaded_files:
                             y=threshold,
                             line_dash='dot',
                             line_color='#c1121f',
+                            line_width=2,
                             annotation_text=f'Threshold ({threshold:.2f})',
                             annotation_position='top right'
                         )
@@ -501,7 +616,7 @@ if uploaded_files:
                             y=threshold_plot,
                             line_dash='dash',
                             line_color='#c1121f',
-                            line_width=1,
+                            line_width=2,
                             annotation_text=f'Threshold ({threshold_plot:.2f})',
                             annotation_position='top right'
                         )
@@ -513,7 +628,7 @@ if uploaded_files:
                                 y=mean_val,
                                 line_dash='dot',
                                 line_color='#6a994e',
-                                line_width=1,
+                                line_width=2,
                                 annotation_text=f'Mean Apps + ARRS ({mean_val:.2f})',
                                 annotation_position='top right'
                             )
@@ -523,7 +638,8 @@ if uploaded_files:
                         fig_weekly.add_vline(
                             x=pd.Timestamp(arrs_end_date),
                             line_dash='dashdot',
-                            line_color='#749857'
+                            line_color='#749857',
+                            line_width=2
                         )
                         fig_weekly.add_annotation(
                             x=pd.Timestamp(arrs_end_date),
@@ -540,12 +656,12 @@ if uploaded_files:
                         hovermode='x unified',
                         xaxis=dict(
                             showgrid=True,
-                            gridwidth=1,
+                            gridwidth=0.5,
                             gridcolor='lightgray'
                         ),
                         yaxis=dict(
                             showgrid=True,
-                            gridwidth=1,
+                            gridwidth=0.5,
                             gridcolor='lightgray'
                         )
                     )
@@ -558,11 +674,11 @@ if uploaded_files:
                     # Prepare data for monthly stacked bar chart (using pre-calculated columns)
                     monthly_agg_plot = monthly_agg.copy()
 
-                    # Create stacked bar plot for monthly appointments
+                    # Create stacked bar plot for monthly appointments with split ARRS colors
                     fig_monthly = px.bar(
                         monthly_agg_plot,
                         x='month',
-                        y=['total_appointments', 'total_arrs_estimated'],
+                        y=['total_appointments', 'arrs_historical', 'arrs_future'],
                         title='Total Appointments per Month',
                         labels={
                             'month': 'Month',
@@ -572,7 +688,8 @@ if uploaded_files:
                         height=400,
                         color_discrete_map={
                             'total_appointments': '#0077b6',
-                            'total_arrs_estimated': '#f48c06'
+                            'arrs_historical': '#f48c06',
+                            'arrs_future': '#cb3f4e'
                         }
                     )
 
@@ -583,13 +700,18 @@ if uploaded_files:
                         textposition='inside'
                     )
                     fig_monthly.update_traces(
-                        selector=dict(name='total_arrs_estimated'),
+                        selector=dict(name='arrs_historical'),
+                        text=monthly_agg_plot['arrs_historical'].round(0),
+                        textposition='inside'
+                    )
+                    fig_monthly.update_traces(
+                        selector=dict(name='arrs_future'),
                         text=monthly_agg_plot['total_with_arrs'].round(0),
                         textposition='inside'
                     )
 
                     # Update legend names
-                    newnames_monthly = {'total_appointments': 'Actual Appointments', 'total_arrs_estimated': 'Monthly ARRS'}
+                    newnames_monthly = {'total_appointments': 'Actual Appointments', 'arrs_historical': 'ARRS (Historical)', 'arrs_future': 'ARRS (Future Est)'}
                     fig_monthly.for_each_trace(lambda t: t.update(name = newnames_monthly.get(t.name, t.name)))
 
 
@@ -598,6 +720,7 @@ if uploaded_files:
                         y=avg_monthly_appointments,
                         line_dash='dot',
                         line_color='#e4af6c',
+                        line_width=2,
                         annotation_text=f'Monthly Average Completed Apps ({avg_monthly_appointments:.1f})',
                         annotation_position='top left'
                     )
@@ -607,7 +730,8 @@ if uploaded_files:
                         fig_monthly.add_vline(
                             x=pd.Timestamp(arrs_end_date),
                             line_dash='dashdot',
-                            line_color='#749857'
+                            line_color='#749857',
+                            line_width=2
                         )
                         fig_monthly.add_annotation(
                             x=pd.Timestamp(arrs_end_date),
@@ -623,12 +747,12 @@ if uploaded_files:
                         hovermode='x unified',
                         xaxis=dict(
                             showgrid=True,
-                            gridwidth=1,
+                            gridwidth=0.5,
                             gridcolor='lightgray'
                         ),
                         yaxis=dict(
                             showgrid=True,
-                            gridwidth=1,
+                            gridwidth=0.5,
                             gridcolor='lightgray'
                         )
                     )
@@ -640,54 +764,6 @@ if uploaded_files:
                     st.subheader(":material/table: Filtered Data Table")
                     st.dataframe(filtered_df, width='stretch')
 
-                # Calculate time_diff based on SLIDER range, not data range
-                # This ensures the denominator (weeks) correctly reflects the period selected by the user,
-                # even if there are gaps in the data (e.g. no appointments on weekends or holidays).
-                if isinstance(date_range[0], pd.Timestamp):
-                    d_start = date_range[0].date()
-                else:
-                    d_start = date_range[0]
-                
-                if isinstance(date_range[1], pd.Timestamp):
-                    d_end = date_range[1].date()
-                else:
-                    d_end = date_range[1]
-                    
-                time_diff = (d_end - d_start).days
-                weeks = time_diff / 7
-                months = time_diff / 30.44
-
-                if arrs_future and should_apply_arrs:
-                    # Calculate weeks from ARRS end date to slider end date for future estimation
-                    if isinstance(slider_end_date, pd.Timestamp):
-                        s_end = slider_end_date.date()
-                    else:
-                        s_end = slider_end_date
-                    
-                    if isinstance(arrs_end_date, pd.Timestamp):
-                        a_end = arrs_end_date.date()
-                    else:
-                        a_end = arrs_end_date
-                        
-                    days_fut = (s_end - a_end).days
-                    future_weeks = days_fut / 7
-                    future_arrs_apps = int(round(estimated_weekly_arrs * future_weeks, 0)) if future_weeks > 0 else 0
-                    total_apps_arrs = len(filtered_df) + arrs_2526 + future_arrs_apps
-                elif should_apply_arrs:
-                    total_apps_arrs = len(filtered_df) + arrs_2526
-                    future_arrs_apps = 0
-                else:
-                    total_apps_arrs = len(filtered_df)
-                    future_arrs_apps = 0
-
-                # Total Surgery Appointments (Historical ONLY)
-                total_surgery_apps = len(filtered_df)
-                total_apps_arrs = total_surgery_apps + (arrs_2526 + future_arrs_apps if should_apply_arrs else 0)
-
-                # Prevent ZeroDivisionError
-                safe_weeks = max(0.1, weeks)
-                av_1000_week = (total_apps_arrs / list_size) * 1000 / safe_weeks
-
                 # Display dynamic statistics based on filtered data
                 with st.expander("**Data Statistics**", icon=":material/database:", expanded=True):
                     st.subheader(":material/database: Data Statistics")
@@ -695,8 +771,10 @@ if uploaded_files:
                     with col1:
                         if drop_duplicates:
                             st.badge(":material/done_outline: Duplicates dropped", color='green')
+                  
                         else:
                             st.badge("⚠️ Duplicate entries", color='yellow')
+            
                     with col2:
                         if exclude_did_not_attend:
                             st.badge(":material/done_outline: Excluding 'Did Not Attend'", color='green')
@@ -749,9 +827,9 @@ if uploaded_files:
                             st.badge(f"< 75% Access Payment", color='orange')
 
                 # Target Achievement Calculator
-                fy_start = date(2025, 4, 1)
-                fy_end = date(2026, 3, 31)
-                last_data_date = filtered_df['appointment_date'].max().date()
+                fy_start = pd.Timestamp(2025, 4, 1)
+                fy_end = pd.Timestamp(2026, 3, 31)
+                last_data_date = pd.Timestamp(filtered_df['appointment_date'].max())
                 
                 # Calculate days and weeks left in FY
                 days_left_in_fy = (fy_end - last_data_date).days
@@ -760,7 +838,7 @@ if uploaded_files:
                 if last_data_date < fy_end:
                     # 1. Calculate Weeks Elapsed and Remaining
                     # Use the start of the FY or the first date in data, whichever is earlier
-                    data_start_date = filtered_df['appointment_date'].min().date()
+                    data_start_date = pd.Timestamp(filtered_df['appointment_date'].min())
                     calc_start_date = min(fy_start, data_start_date)
                     
                     l_date = last_data_date
@@ -773,7 +851,7 @@ if uploaded_files:
                     
                     # 2. ARRS Projection (Respecting Data Lag)
                     # Project from arrs_month till FY end
-                    a_end = arrs_end_date
+                    a_end = arrs_end_date if isinstance(arrs_end_date, pd.Timestamp) else pd.Timestamp(arrs_end_date)
                         
                     days_from_arrs_to_end = (fy_end - a_end).days
                     weeks_from_arrs_to_end = max(0, days_from_arrs_to_end / 7)
@@ -817,7 +895,7 @@ if uploaded_files:
                             st.warning(f":material/target: To reach the annual target, you need to add **{required_extra_per_week:.1f}** additional appointments per week (above our mean weekly surgery apps and ARRS apps) for the remaining **{weeks_remaining:.1f}** weeks.")
                             
                         else:
-                            st.success(f"✅ Based on your current average, you are on track to hit the annual target!")
+                            st.success(f":material/done_outline: Based on your current average, you are on track to hit the annual target!")
 
                         # 8. Visual Projection Chart
                         st.divider()
@@ -897,6 +975,37 @@ if uploaded_files:
 
 
 
+        with st.expander("Clinician Stats", icon=":material/stethoscope:"):
+            st.subheader(":material/stethoscope: Clinician Stats")
+            clinician_stats_df = []
+            # Use filtered_df_with_dna which includes DNAs for accurate stats
+            for clinician in selected_clinicians:
+                c_df = filtered_df_with_dna[filtered_df_with_dna['clinician'] == clinician]
+                if not c_df.empty:
+                    total_apps = len(c_df)
+                    c_apps_df = c_df[c_df['appointment_status'] == 'Did Not Attend']
+                    dna_count = len(c_apps_df)
+                    dna_percentage = (dna_count / total_apps) * 100 if total_apps > 0 else 0
+                    duration = c_df['duration'].mean()
+                    book_to_app = c_df['book_to_app'].mean()
+                    
+                    data = {
+                        'Clinician': clinician,
+                        'Total Apps': total_apps,
+                        'DNAs': dna_count,
+                        'DNA %': round(dna_percentage, 2),
+                        'Avg App Duration (mins)': round(duration, 2),
+                        'Avg Book to App (mins)': round(book_to_app, 2)
+                    }
+                    clinician_stats_df.append(data)
+                    
+            if clinician_stats_df:
+                final_df = pd.DataFrame(clinician_stats_df)
+                final_df = final_df.sort_values(by='Total Apps', ascending=False).reset_index(drop=True)
+                st.dataframe(final_df, use_container_width=True, hide_index=True)
+            else:
+                st.warning("No clinician data available for the selected filters.")
+
         # Show file information
         with st.expander("Debug Information", icon=":material/bug_report:"):
             if 'filtered_df' not in locals():
@@ -944,7 +1053,7 @@ if uploaded_files:
             st.markdown("#### :material/settings: Input Configuration")
             col1, col2, col3, col4 = st.columns(4)
             with col1:
-                st.markdown(f"**List Size:** :orange[{list_size}]")
+                st.markdown(f"**Weighted List Size:** :orange[{list_size}]")
             with col2:
                 st.markdown(f"**ARRS Entered:** :orange[{arrs_2526}]")
             with col3:
@@ -1040,6 +1149,10 @@ if uploaded_files:
                 st.code(f"gap = annual_target_total ({annual_target_total:.0f}) - total_baseline_projection ({total_baseline_projection:.0f}) = {gap:.0f}")
             else:
                 st.info("Target Calculator data not available (data might extend beyond FY end).")
+                
+
+
+            
 
         # Download combined CSV
         csv = combined_df.to_csv(index=False)
@@ -1050,16 +1163,17 @@ if uploaded_files:
             mime="text/csv"
         )
 else:
-    st.info("""### :material/line_start_arrow:  Please upload CSV files using the sidebar to get started!  
-            Create an appointment report on SytmOne for the time period required.add(
+    st.info("""### :material/line_start_arrow:  Please upload CSV files using the sidebar to get started!""")
+    st.info("""Create an **appointment report** in clincal reporting on SytmOne for the time period required. **Breakdown** search with the following columns:  
             
-            # Breakdown search with the following columns
-            Appointment Date  
-            Appointment Status  
-            Rota type
-            Appointment flags  
-            Clinician  
-            Appointment status  
-            Patient ID
-
-            Export as multiple searhes as SystmOne only allow and export of 30 000 rows per search.""")
+            - Appointment Date  
+            - Appointment Status  
+            - Rota type
+            - Appointment flags  
+            - Clinician  
+            - Appointment status  
+            - Patient ID  
+            
+Export as multiple searhes (incrementing date with each) as SystmOne only allow and export of 30 000 rows per search.  
+Download the search below and input into SystmOne.  
+Any questions please email jan.duplessis@nhs.net""")
