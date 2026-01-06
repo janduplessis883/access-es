@@ -380,7 +380,7 @@ if uploaded_files:
                     col1, col2 = st.columns([1, 6])
                     with col1:
                         if drop_duplicates:
-                            st.badge(":material/done_outline: Duplicates dropped", color='green', help=":material/done_outline: Duplicated can be left but try with and without.")
+                            st.badge(":material/done_outline: Duplicates dropped", color='green', help=":material/info: Duplicated can be left but try with and without.")
                         else:
                             st.badge(":material/warning: Duplicate entries", color='yellow')
                     
