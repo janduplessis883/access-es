@@ -9,6 +9,8 @@ import io
 from config import *
 from utils import *
 from plots import *
+from forecast_appointments import forecast_surgery_appointments
+from train_model import prepare_training_data, train_nbeats_model, forecast_with_trained_model
 
 # Page Configuration
 st.set_page_config(
@@ -42,7 +44,7 @@ with st.sidebar:
     drop_duplicates = st.toggle("Drop Duplicate Entries", value=True)
     exclude_did_not_attend = st.toggle(
         "Exclude 'Did Not Attend'",
-        value=True,
+        value=False,
         help="Filter out appointments with **'Did Not Attend'** status"
     )
     
@@ -148,6 +150,82 @@ with st.sidebar:
         help="Simulate adding total appointments to the historical data. "
              "This affects the Average apps per 1000 per week calculation."
     )
+    
+    st.divider()
+    
+    # ML Model Training Section
+    st.header("🤖 ML Forecasting")
+    st.caption("Train NBEats model with historical data")
+    
+    # Upload additional training data
+    training_files = st.file_uploader(
+        "Upload Additional Training Data (optional)",
+        type="csv",
+        accept_multiple_files=True,
+        help="Upload additional appointment CSVs for training. Historical data from 2022-2025 is already included.",
+        key="training_upload"
+    )
+    
+    # Column name specifications for training data
+    with st.expander("📋 Training Data Column Settings", expanded=False):
+        st.caption("Select columns from your training data")
+        
+        # Get column names from uploaded files or use defaults
+        available_columns = ["Date", "used_apps"]  # Defaults for historical data
+        
+        if training_files and len(training_files) > 0:
+            try:
+                # Read first uploaded file to get column names
+                first_file = training_files[0]
+                first_file.seek(0)  # Reset file pointer
+                sample_df = pd.read_csv(first_file, nrows=1)
+                available_columns = list(sample_df.columns)
+                first_file.seek(0)  # Reset again for actual use
+                st.success(f"✓ Detected {len(available_columns)} columns from uploaded file")
+            except Exception as e:
+                st.warning(f"Could not read columns from uploaded file. Using defaults.")
+        else:
+            st.info("💡 Upload training data above to see available columns, or use defaults for historical data (2022-2025)")
+
+        # Find best default for date column
+        date_default_idx = 0
+        for idx, col in enumerate(available_columns):
+            if 'date' in col.lower():
+                date_default_idx = idx
+                break
+        
+        date_column_name = st.selectbox(
+            "Date Column",
+            options=available_columns,
+            index=date_default_idx,
+            help="Select the column containing dates"
+        )
+    
+
+        # Find best default for appointments column
+        app_default_idx = min(1, len(available_columns) - 1)
+        for idx, col in enumerate(available_columns):
+            if any(keyword in col.lower() for keyword in ['app', 'count', 'used', 'total']):
+                app_default_idx = idx
+                break
+        
+        appointments_column_name = st.selectbox(
+            "Appointments Column",
+            options=available_columns,
+            index=app_default_idx,
+            help="Select the column containing appointment counts"
+        )
+
+    # Train button
+    if st.button("🚀 Train NBEats Model", type="primary", use_container_width=True):
+        st.session_state['train_model'] = True
+    else:
+        if 'train_model' not in st.session_state:
+            st.session_state['train_model'] = False
+    
+    # Display training status
+    if 'model_trained' in st.session_state and st.session_state['model_trained']:
+        st.success(f"✅ Model trained! {st.session_state.get('training_weeks', 0)} weeks of data used.")
     
     st.divider()
     
@@ -323,28 +401,57 @@ if uploaded_files:
                     cutoff_date
                 )
                 
-                # Scatter Plot Visualization
-                with st.expander("Visualizations - Appointments Scatter Plot", icon=":material/scatter_plot:", expanded=False):
-                    st.subheader(":material/scatter_plot: Visualizations")
+                # Model Training Logic
+                if st.session_state.get('train_model', False):
+                    with st.spinner("🚀 Training NBEats model with historical data..."):
+                        # Prepare training data with user-specified column names
+                        training_data = prepare_training_data(
+                            filtered_df,
+                            training_data_path='data/traming_data.csv',
+                            additional_training_files=training_files,
+                            date_column=date_column_name,
+                            appointments_column=appointments_column_name
+                        )
+                        
+                        if training_data is not None:
+                            # Train the model
+                            trained_model = train_nbeats_model(
+                                training_data,
+                                influenza_csv_path='data/influenza.csv'
+                            )
+                            
+                            if trained_model['success']:
+                                st.session_state['trained_model'] = trained_model
+                                st.session_state['model_trained'] = True
+                                st.session_state['training_weeks'] = trained_model['training_weeks']
+                                st.success(
+                                    f"✅ Model trained successfully! {trained_model['training_weeks']} weeks of data used. "
+                                    f"Model ready for forecasting."
+                                )
+                            else:
+                                st.error(f"❌ Training failed: {trained_model['message']}")
+                                st.session_state['model_trained'] = False
+                        else:
+                            st.error("❌ Failed to prepare training data.")
+                            st.session_state['model_trained'] = False
                     
-                    fig = create_scatter_plot(filtered_df, plot_view_option, selected_clinicians)
-                    st.plotly_chart(fig, width='stretch')
-                    
-                    # Duration statistics
-                    st.info(
-                        f"Average Appointment length: **{filtered_df['duration'].mean():.2f} minutes** "
-                        f"(Across all clinics selected above) Max: {filtered_df['duration'].max():.2f} minutes "
-                        f"Min: {filtered_df['duration'].min():.2f} minutes"
-                    )
-                    st.info(
-                        f"Average Time from Booking till Appointment: **{filtered_df['book_to_app'].mean():.2f} minutes** "
-                        f"(Across all clinics selected above) Max: {filtered_df['book_to_app'].max():.2f} minutes "
-                        f"Min: {filtered_df['book_to_app'].min():.2f} minutes"
-                    )
+                    # Reset train flag
+                    st.session_state['train_model'] = False
+                    st.rerun()
+                
                 
                 # Weekly & Monthly Trends
                 with st.expander("Visualizations - Weekly & Monthly Trends", icon=":material/bar_chart:", expanded=False):
                     st.subheader(":material/bar_chart: Weekly & Monthly Trends")
+                    
+                    
+                    # Monthly plot
+                    fig_monthly = create_monthly_trend_plot(
+                        monthly_agg,
+                        arrs_end_date,
+                        arrs_values['should_apply_arrs']
+                    )
+                    st.plotly_chart(fig_monthly, width='stretch')
                     
                     # Toggle for weekly view
                     show_per_1000 = st.toggle(
@@ -363,13 +470,6 @@ if uploaded_files:
                     )
                     st.plotly_chart(fig_weekly, width='stretch')
                     
-                    # Monthly plot
-                    fig_monthly = create_monthly_trend_plot(
-                        monthly_agg,
-                        arrs_end_date,
-                        arrs_values['should_apply_arrs']
-                    )
-                    st.plotly_chart(fig_monthly, width='stretch')
                 
                 # Data Statistics
                 expander_open = not show_dataframe
@@ -483,20 +583,98 @@ if uploaded_files:
                                 "you are on track to hit the annual target!"
                             )
                         
-                        # Projection Chart
+                        # Projection Chart with NBEats Forecasting
                         st.divider()
                         st.markdown("#### :material/bar_chart: Annual Projection (Weekly)")
                         
+                        # Generate forecasts using NBEats model
+                        forecast_df = None
+                        
+                        # Check if trained model exists in session state
+                        if st.session_state.get('model_trained', False) and 'trained_model' in st.session_state:
+                            # Use trained model for forecasting
+                            with st.spinner("Generating forecast with trained model..."):
+                                try:
+                                    forecast_df = forecast_with_trained_model(
+                                        st.session_state['trained_model'],
+                                        forecast_weeks=int(target_metrics['weeks_remaining'])
+                                    )
+                                    
+                                    if forecast_df is not None:
+                                        st.success(
+                                            f"🤖 Using **trained model** ({st.session_state.get('training_weeks', 0)} weeks training data). "
+                                            f"Predicted {len(forecast_df)} weeks of appointments."
+                                        )
+                                    else:
+                                        st.warning("Trained model forecast failed. Using baseline projection.")
+                                except Exception as e:
+                                    st.warning(f"Trained model error: {str(e)}. Using baseline projection.")
+                                    forecast_df = None
+                        else:
+                            # Fall back to quick forecast with current data only
+                            with st.spinner("Generating forecast (train model in sidebar for better results)..."):
+                                try:
+                                    forecast_df = forecast_surgery_appointments(
+                                        weekly_agg,
+                                        influenza_csv_path='data/influenza.csv',
+                                        forecast_weeks=int(target_metrics['weeks_remaining'])
+                                    )
+                                    
+                                    if forecast_df is not None:
+                                        st.info(
+                                            f"ℹ️ Quick forecast generated. **Train the model in sidebar** "
+                                            f"for improved accuracy with 3+ years of historical data."
+                                        )
+                                    else:
+                                        st.info(
+                                            ":material/info: NBEats forecasting not available. "
+                                            "Using baseline historical average for projection."
+                                        )
+                                except Exception as e:
+                                    st.warning(
+                                        f":material/warning: Forecasting error: {str(e)}. "
+                                        f"Using baseline projection instead."
+                                    )
+                                    forecast_df = None
+                        
+                        # Create projection dataframe with or without ML forecast
                         proj_df = create_projection_dataframe(
                             weekly_agg,
                             target_metrics,
                             arrs_values,
-                            exp_add_apps_per_week
+                            exp_add_apps_per_week,
+                            forecast_df=forecast_df
                         )
                         
                         fig_proj = create_projection_chart(proj_df, list_size)
                         st.plotly_chart(fig_proj, width='stretch')
+                        
+                        # Show forecast details if available
+                        if forecast_df is not None:
+                            with st.expander("View NBEats Forecast Details", expanded=False):
+                                st.dataframe(
+                                    forecast_df.style.format({'forecasted_appointments': '{:.0f}'}),
+                                    width='stretch',
+                                    hide_index=True
+                                )
                 
+                # Scatter Plot Visualization
+                with st.expander("Visualizations - Appointments Scatter Plot", icon=":material/scatter_plot:", expanded=False):
+                    st.subheader(":material/scatter_plot: Visualizations")
+                    
+                    fig = create_scatter_plot(filtered_df, plot_view_option, selected_clinicians)
+                    st.plotly_chart(fig, width='stretch')
+                    
+                    # Duration statistics
+                    st.badge(
+                        f"Average Appointment Length: **{filtered_df['duration'].mean():.2f} minutes** "
+                        f"max: {filtered_df['duration'].max():.2f} minutes ", icon=":material/health_cross:"
+                    )
+                    st.badge(
+                        f"Average Time Booking to Appointment: **{filtered_df['book_to_app'].mean():.2f} minutes** "
+                        f"max: {filtered_df['book_to_app'].max():.2f} minutes ", icon=":material/health_cross:"
+                    )    
+            
                 # Clinician Stats
                 with st.expander("Clinician Stats", icon=":material/stethoscope:"):
                     st.subheader(":material/stethoscope: Clinician Stats")
@@ -518,6 +696,11 @@ if uploaded_files:
                     stats_df = calculate_clinician_stats(filtered_df_with_dna, selected_clinicians)
                     
                     if stats_df is not None:
+                        
+                        fig_histograms = create_clinician_stats_histograms(stats_df)
+                        st.pyplot(fig_histograms)
+                        # Add 1x4 histogram subplot using seaborn
+                        st.divider()
                         st.dataframe(stats_df, width='stretch', hide_index=True)
                     else:
                         st.warning("No clinician data available for the selected filters.")
@@ -637,11 +820,11 @@ if uploaded_files:
                 
                 # Download CSV
                 csv = combined_df.to_csv(index=False)
-                st.download_button(
+                st.sidebar.download_button(
                     label="Download Combined CSV",
                     data=csv,
                     file_name="combined_data.csv",
-                    mime="text/csv"
+                    mime="text/csv", type="secondary"
                 )
             
             else:

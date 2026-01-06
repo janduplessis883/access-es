@@ -333,8 +333,8 @@ def calculate_target_achievement(df, list_size, arrs_values, exp_add_apps_per_we
     }
 
 
-def create_projection_dataframe(weekly_agg, target_metrics, arrs_values, exp_add_apps_per_week):
-    """Create dataframe for projection chart"""
+def create_projection_dataframe(weekly_agg, target_metrics, arrs_values, exp_add_apps_per_week, forecast_df=None):
+    """Create dataframe for projection chart with optional ML forecasts"""
     # Historical part
     proj_df = weekly_agg[['week', 'total_appointments']].copy()
     proj_df['type'] = 'Historical'
@@ -354,10 +354,16 @@ def create_projection_dataframe(weekly_agg, target_metrics, arrs_values, exp_add
     for w in future_weeks_list:
         remaining_gap = max(0, target_metrics['required_extra_per_week'] - exp_add_apps_per_week)
         
+        # Use forecast if available, otherwise use average
+        if forecast_df is not None and w in forecast_df['week'].values:
+            forecasted_value = float(forecast_df[forecast_df['week'] == w]['forecasted_appointments'].iloc[0])
+        else:
+            forecasted_value = target_metrics['avg_weekly_surgery']
+        
         future_data.append({
             'week': w,
-            'total_appointments': target_metrics['avg_weekly_surgery'],
-            'type': 'Projected Baseline',
+            'total_appointments': forecasted_value,
+            'type': 'Forecasted' if forecast_df is not None else 'Projected Baseline',
             'ARRS': arrs_values['estimated_weekly_arrs'],
             'Added (Exp)': exp_add_apps_per_week,
             'Catch-up Needed': remaining_gap

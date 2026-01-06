@@ -5,6 +5,8 @@ Contains all Plotly visualization functions
 
 import plotly.express as px
 import plotly.graph_objects as go
+import matplotlib.pyplot as plt
+import seaborn as sns
 from config import *
 
 
@@ -182,7 +184,7 @@ def create_weekly_trend_plot(weekly_agg, show_per_1000, list_size, arrs_end_date
             }
         )
         
-        # Add text labels
+        # Add text labels showing cumulative totals
         fig.update_traces(
             selector=dict(name=y_plot),
             text=weekly_agg_plot[y_plot],
@@ -190,7 +192,7 @@ def create_weekly_trend_plot(weekly_agg, show_per_1000, list_size, arrs_end_date
         )
         fig.update_traces(
             selector=dict(name='arrs_historical'),
-            text=weekly_agg_plot['arrs_historical'].round(0),
+            text=(weekly_agg_plot[y_plot] + weekly_agg_plot['arrs_historical']).round(0),
             textposition='inside'
         )
         fig.update_traces(
@@ -275,7 +277,7 @@ def create_monthly_trend_plot(monthly_agg, arrs_end_date, should_apply_arrs):
         }
     )
     
-    # Add text labels
+    # Add text labels showing cumulative totals
     fig.update_traces(
         selector=dict(name='total_appointments'),
         text=monthly_agg_plot['total_appointments'],
@@ -283,7 +285,7 @@ def create_monthly_trend_plot(monthly_agg, arrs_end_date, should_apply_arrs):
     )
     fig.update_traces(
         selector=dict(name='arrs_historical'),
-        text=monthly_agg_plot['arrs_historical'].round(0),
+        text=(monthly_agg_plot['total_appointments'] + monthly_agg_plot['arrs_historical']).round(0),
         textposition='inside'
     )
     fig.update_traces(
@@ -400,6 +402,28 @@ def create_projection_chart(combined_proj_df, list_size):
         height=PROJECTION_PLOT_HEIGHT
     )
     
+    # Add text labels showing cumulative totals
+    fig.update_traces(
+        selector=dict(name='total_appointments'),
+        text=combined_proj_df['total_appointments'].round(0),
+        textposition='inside'
+    )
+    fig.update_traces(
+        selector=dict(name='Added (Exp)'),
+        text=(combined_proj_df['total_appointments'] + combined_proj_df['Added (Exp)']).round(0),
+        textposition='inside'
+    )
+    fig.update_traces(
+        selector=dict(name='ARRS'),
+        text=(combined_proj_df['total_appointments'] + combined_proj_df['Added (Exp)'] + combined_proj_df['ARRS']).round(0),
+        textposition='inside'
+    )
+    fig.update_traces(
+        selector=dict(name='Catch-up Needed'),
+        text=(combined_proj_df['total_appointments'] + combined_proj_df['Added (Exp)'] + combined_proj_df['ARRS'] + combined_proj_df['Catch-up Needed']).round(0),
+        textposition='inside'
+    )
+    
     # Add threshold line
     weekly_threshold = THRESHOLD_100_PERCENT * (list_size / 1000)
     fig.add_hline(
@@ -424,5 +448,83 @@ def create_projection_chart(combined_proj_df, list_size):
             gridcolor='lightgray'
         )
     )
+    
+    return fig
+
+
+def create_clinician_stats_histograms(stats_df):
+    """Create 1x4 subplot of histograms using seaborn for clinician statistics"""
+    # Set seaborn style
+    sns.set_style("whitegrid")
+    
+    # Create figure with 1 row and 4 columns
+    fig, axes = plt.subplots(1, 4, figsize=(18, 3))
+    
+    # Total Apps histogram
+    sns.histplot(
+        data=stats_df,
+        x='Total Apps',
+        ax=axes[0],
+        color='#1f77b4',
+        kde=True,
+        bins=15
+    )
+    axes[0].set_title('Total Apps Distribution', fontsize=12, fontweight='bold')
+    axes[0].set_xlabel('Total Apps', fontsize=10)
+    axes[0].set_ylabel('Frequency', fontsize=10)
+    axes[0].spines['top'].set_visible(False)
+    axes[0].spines['right'].set_visible(False)
+    axes[0].spines['left'].set_visible(False)
+    
+    # DNAs histogram
+    sns.histplot(
+        data=stats_df,
+        x='DNAs',
+        ax=axes[1],
+        color='#d62728',
+        kde=True,
+        bins=15
+    )
+    axes[1].set_title('DNAs Distribution', fontsize=12, fontweight='bold')
+    axes[1].set_xlabel('DNAs', fontsize=10)
+    axes[1].set_ylabel('Frequency', fontsize=10)
+    axes[1].spines['top'].set_visible(False)
+    axes[1].spines['right'].set_visible(False)
+    axes[1].spines['left'].set_visible(False)
+    
+    # Avg App Duration histogram
+    sns.histplot(
+        data=stats_df,
+        x='Avg App Duration (mins)',
+        ax=axes[2],
+        color='#2ca02c',
+        kde=True,
+        bins=15
+    )
+    axes[2].set_title('Avg App Duration (mins) Distribution', fontsize=12, fontweight='bold')
+    axes[2].set_xlabel('Duration (mins)', fontsize=10)
+    axes[2].set_ylabel('Frequency', fontsize=10)
+    axes[2].spines['top'].set_visible(False)
+    axes[2].spines['right'].set_visible(False)
+    axes[2].spines['left'].set_visible(False)
+    
+    # Avg Book to App histogram
+    sns.histplot(
+        data=stats_df,
+        x='Avg Book to App (mins)',
+        ax=axes[3],
+        color='#ff7f0e',
+        kde=True,
+        bins=15
+    )
+    axes[3].set_title('Avg Book to App (mins) Distribution', fontsize=12, fontweight='bold')
+    axes[3].set_xlabel('Book to App (mins)', fontsize=10)
+    axes[3].set_ylabel('Frequency', fontsize=10)
+    axes[3].spines['top'].set_visible(False)
+    axes[3].spines['right'].set_visible(False)
+    axes[3].spines['left'].set_visible(False)
+    
+    # Apply tight layout
+    plt.tight_layout()
     
     return fig
