@@ -257,7 +257,7 @@ if uploaded_files:
                 if drop_duplicates:
                     st.badge(f":material/done_outline: Dropped **{dup_count}** duplicate rows.", color='blue')
                 else:
-                    st.badge(f":material/warning: **{dup_count}** Duplicate rows identified.", color='blue')
+                    st.badge(f":material/warning: **{dup_count}** Duplicate rows identified.", color='yellow')
                 
                 # Apply DNA exclusion
                 dna_count_before = len(filtered_df)
@@ -268,7 +268,7 @@ if uploaded_files:
                     st.badge(
                         f":material/done_outline: Excluded {dna_count} 'Did Not Attend' appointments "
                         f"({dna_percentage:.1f}% of total)",
-                        color='green'
+                        color='blue'
                     )
                 
                 # Calculate time metrics
@@ -324,7 +324,7 @@ if uploaded_files:
                 )
                 
                 # Scatter Plot Visualization
-                with st.expander("Visualizations - Scatter Plots Appointments", icon=":material/scatter_plot:", expanded=False):
+                with st.expander("Visualizations - Appointments Scatter Plot", icon=":material/scatter_plot:", expanded=False):
                     st.subheader(":material/scatter_plot: Visualizations")
                     
                     fig = create_scatter_plot(filtered_df, plot_view_option, selected_clinicians)
