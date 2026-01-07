@@ -4,3 +4,4 @@ plotly
 darts
 torch
 notionhelper
+seaborn
