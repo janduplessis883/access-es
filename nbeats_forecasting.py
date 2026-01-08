@@ -4,191 +4,375 @@ from darts.dataprocessing.transformers import Scaler
 from darts.dataprocessing.pipeline import Pipeline
 from sklearn.preprocessing import MinMaxScaler
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
+from darts.metrics import mape, smape, rmse, mae
 import pandas as pd
 import os
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import streamlit as st 
+from notionhelper import NotionHelper
+import seaborn as sns 
+import matplotlib.pyplot as plt
 
 
-def create_training_dataset(
-    training_df,
-    weekly_agg_df,
-    date_column='Appointment date',
-    app_column='used_apps',
-    influenza_csv_path='data/influenza.csv',
-    training_cutoff_date='2025-03-30',
-    current_start_date='2025-04-06'
-):
+
+def process_influenza_data():
     """
-    Create a combined training dataset from historical training data and current appointments.
-    
-    Parameters:
-    -----------
-    training_df : pd.DataFrame
-        Historical training data (user uploaded)
-    weekly_agg_df : pd.DataFrame
-        Current weekly aggregated data from app
-    date_column : str
-        Name of date column in training_df
-    app_column : str
-        Name of appointments column in training_df
-    influenza_csv_path : str
-        Path to influenza covariate data
-    training_cutoff_date : str
-        End date for training data (week ending, e.g., '2025-03-30')
-    current_start_date : str
-        Start date for current data (week ending, e.g., '2025-04-06')
+    Load and visualize influenza data from Notion database.
     
     Returns:
     --------
-    TimeSeries
-        Multivariate Darts TimeSeries with appointments and influenza
-    dict
-        Metadata about the created dataset
+    pd.DataFrame
+        Influenza data with date and influenza columns
+    matplotlib.figure.Figure
+        Line plot of influenza over time
     """
+    notion_token = st.secrets['NOTION_TOKEN']
+    database_id = st.secrets['DATA_ID']
+    
+    nh = NotionHelper(notion_token)
+    inf = nh.get_data_source_pages_as_dataframe(database_id)
+    inf['date'] = pd.to_datetime(inf['date'], format='%Y-%m-%d')
+    inf = inf.sort_values(by='date').reset_index(drop=True)
+    inf.drop(columns=['Name', 'notion_page_id'], inplace=True)
+    
+    # Create figure and axes - sns.lineplot returns Axes, not Figure
+    fig, ax = plt.subplots(figsize=(16, 3))
+    sns.lineplot(data=inf, x='date', y='influenza', ax=ax, color='black')
+    ax.set_title('Influenza Data Over Time', fontsize=14, fontweight='bold')
+    ax.set_xlabel('Date', fontsize=12)
+    ax.set_ylabel('Influenza Level', fontsize=12)
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+    
+    return inf, fig
+
+
+def process_historic_app_data(training_files, date_column='Appointment date', app_column='Appointment status'):
+    """
+    Process uploaded historic training data files and create visualization.
+    
+    This function:
+    1. Combines multiple uploaded CSV files
+    2. Filters for 'Finished' appointments only
+    3. Aggregates to weekly frequency for full time period
+    4. Creates visualization of appointments over time
+    
+    Parameters:
+    -----------
+    training_files : list
+        List of uploaded file objects from st.file_uploader
+    date_column : str
+        Name of date column in training data
+    app_column : str
+        Name of appointment status column in training data
+        
+    Returns:
+    --------
+    pd.DataFrame
+        Weekly aggregated appointment data with columns ['week', 'appointments']
+    matplotlib.figure.Figure
+        Line plot showing appointments over time
+    """
+    
     try:
-        # 1. Load and prepare first appointment dataset (training data)
-        df_appts_1 = training_df.copy()
+        # 1. Load and combine all training files
+        training_dfs = []
+        for idx, file in enumerate(training_files):
+            file.seek(0)  # Reset file pointer
+            df = pd.read_csv(file)
+            print(f"Loaded file {idx+1} ({file.name}): {len(df)} rows")
+            training_dfs.append(df)
         
-        # FIRST: Filter to only include 'Finished' appointments
-        if app_column in df_appts_1.columns:
-            # Filter where appointment status = 'Finished'
-            df_appts_1 = df_appts_1[df_appts_1[app_column] == 'Finished']
-            print(f"Filtered to {len(df_appts_1)} 'Finished' appointments from training data")
-        else:
-            raise ValueError(f"Column '{app_column}' (Appointment Status) not found in training data")
+        if not training_dfs:
+            raise ValueError("No training files provided")
         
-        # Ensure date column is datetime
-        if date_column in df_appts_1.columns:
-            df_appts_1[date_column] = pd.to_datetime(df_appts_1[date_column])
-        else:
-            raise ValueError(f"Column '{date_column}' not found in training data")
+        # Combine all files
+        combined_df = pd.concat(training_dfs, ignore_index=True)
+        print(f"Combined {len(training_dfs)} files: {len(combined_df)} total rows")
         
-        # TEMPORARY: Trim to specific date range (3 Oct 2023 - 30 March 2025)
-        start_cutoff = pd.to_datetime('2023-10-01')
-        end_cutoff = pd.to_datetime(training_cutoff_date)
+        # 2. Filter for 'Finished' appointments only
+        if app_column not in combined_df.columns:
+            raise ValueError(f"Column '{app_column}' not found. Available columns: {list(combined_df.columns)}")
         
-        df_appts_1 = df_appts_1[
-            (df_appts_1[date_column] >= start_cutoff) & 
-            (df_appts_1[date_column] <= end_cutoff)
-        ]
-        print(f"Trimmed to {len(df_appts_1)} appointments between {start_cutoff.date()} and {end_cutoff.date()}")
+        finished_df = combined_df[combined_df[app_column] == 'Finished'].copy()
+        print(f"Filtered to {len(finished_df)} 'Finished' appointments ({len(finished_df)/len(combined_df)*100:.1f}% of total)")
         
-        # Set date as index for resampling
-        df_appts_1 = df_appts_1.set_index(date_column)
+        # 3. Convert date column to datetime
+        if date_column not in finished_df.columns:
+            raise ValueError(f"Column '{date_column}' not found. Available columns: {list(finished_df.columns)}")
         
-        # Aggregate to weekly using resample().size()
-        df_appts_1_weekly = df_appts_1.resample('W').size().reset_index()
-        df_appts_1_weekly.columns = ['week', 'appointments']
-        print(f"Aggregated to {len(df_appts_1_weekly)} weeks of data")
+        finished_df[date_column] = pd.to_datetime(finished_df[date_column])
         
-        # Create complete weekly range and fill missing values
-        min_week = df_appts_1_weekly['week'].min()
-        max_week = df_appts_1_weekly['week'].max()
+        # 4. Set date as index for resampling
+        finished_df = finished_df.set_index(date_column)
+        
+        # 5. Aggregate to weekly frequency (full time period)
+        weekly_df = finished_df.resample('W').size().reset_index()
+        weekly_df.columns = ['week', 'appointments']
+        print(f"Aggregated to {len(weekly_df)} weeks")
+        print(f"Date range: {weekly_df['week'].min()} to {weekly_df['week'].max()}")
+        
+        # 6. Fill missing weeks with zeros
+        min_week = weekly_df['week'].min()
+        max_week = weekly_df['week'].max()
         complete_weeks = pd.date_range(start=min_week, end=max_week, freq='W')
         complete_df = pd.DataFrame({'week': complete_weeks})
-        df_appts_1_weekly = complete_df.merge(df_appts_1_weekly, on='week', how='left').fillna(0)
-        print(f"Filled to {len(df_appts_1_weekly)} complete weeks (missing weeks filled with 0)")
+        weekly_df = complete_df.merge(weekly_df, on='week', how='left').fillna(0)
+        print(f"Filled to {len(weekly_df)} complete weeks (gaps filled with 0)")
         
-        # 2. Load second appointment dataset (current data from app)
-        df_appts_2 = weekly_agg_df.copy()
+        # 7. Add summary statistics
+        weekly_df['appointments'] = weekly_df['appointments'].astype(int)
+        mean_apps = weekly_df['appointments'].mean()
+        median_apps = weekly_df['appointments'].median()
+        total_apps = weekly_df['appointments'].sum()
         
-        # Filter to start from specified date (week ending 6 April 2025)
-        start_date = pd.to_datetime(current_start_date)
-        if 'week' in df_appts_2.columns:
-            df_appts_2['week'] = pd.to_datetime(df_appts_2['week'])
-            df_appts_2 = df_appts_2[df_appts_2['week'] >= start_date]
-            df_appts_2 = df_appts_2[['week', 'total_appointments']].copy()
-            df_appts_2.columns = ['week', 'appointments']
-            
-            # Fill missing weeks in current data too
-            if len(df_appts_2) > 0:
-                min_week_2 = df_appts_2['week'].min()
-                max_week_2 = df_appts_2['week'].max()
-                complete_weeks_2 = pd.date_range(start=min_week_2, end=max_week_2, freq='W')
-                complete_df_2 = pd.DataFrame({'week': complete_weeks_2})
-                df_appts_2 = complete_df_2.merge(df_appts_2, on='week', how='left').fillna(0)
-                print(f"Current data: {len(df_appts_2)} complete weeks")
-        else:
-            raise ValueError("'week' column not found in weekly_agg_df")
+        print(f"\nStatistics:")
+        print(f"  Total appointments: {total_apps:,}")
+        print(f"  Mean per week: {mean_apps:.1f}")
+        print(f"  Median per week: {median_apps:.1f}")
+        print(f"  Min per week: {weekly_df['appointments'].min()}")
+        print(f"  Max per week: {weekly_df['appointments'].max()}")
         
-        # 3. Convert to Darts TimeSeries (no need for fill_missing_dates now)
-        ts_appts_1 = TimeSeries.from_dataframe(
-            df_appts_1_weekly, 
-            time_col='week', 
-            value_cols='appointments', 
-            freq='W'
-        )
+        # 8. Create visualization
+        fig, ax = plt.subplots(figsize=(16, 4))
         
-        ts_appts_2 = TimeSeries.from_dataframe(
-            df_appts_2, 
-            time_col='week', 
-            value_cols='appointments', 
-            freq='W'
-        )
+        # Main line plot
+        sns.barplot(data=weekly_df, x='week', y='appointments', ax=ax, linewidth=2, color='#a33b54')
         
-        # 4. Merge them chronologically (use ignore_time_axis=True to handle gap)
-        ts_appointments = ts_appts_1.concatenate(ts_appts_2, ignore_time_axis=True)
-        print(f"Concatenated training and current data: {len(ts_appointments)} total weeks")
+        # Add mean line
+        ax.axhline(y=mean_apps, color='#ab271f', linestyle='--', linewidth=1.5, 
+                   label=f'Mean: {mean_apps:.1f} apps/week', alpha=0.7)
         
-        # 5. Load Influenza data
-        if not os.path.exists(influenza_csv_path):
-            raise FileNotFoundError(f"Influenza data not found at {influenza_csv_path}")
+        # Styling
+        ax.set_title(f'Historic Training Data: Weekly Appointments Over Time\n'
+                    f'{len(training_dfs)} files | {len(combined_df):,} total rows | '
+                    f'{len(finished_df):,} finished appointments | {len(weekly_df)} weeks',
+                    fontsize=14, fontweight='bold')
+        ax.set_xlabel('Week', fontsize=12)
+        ax.set_ylabel('Number of Appointments', fontsize=12)
+        ax.grid(True, alpha=0.3, linestyle='--')
+        ax.legend(fontsize=10)
         
-        df_flu = pd.read_csv(influenza_csv_path)
+        # Format y-axis with commas
+        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{int(x):,}'))
+        
+        plt.tight_layout()
+        
+        print(f"\n✅ Successfully processed historic training data")
+        
+        return weekly_df, fig
+        
+    except Exception as e:
+        print(f"\n❌ Error processing historic training data: {str(e)}")
+        
+        # Return empty dataframe and figure on error
+        empty_df = pd.DataFrame(columns=['week', 'appointments'])
+        fig, ax = plt.subplots(figsize=(12, 6))
+        ax.text(0.5, 0.5, f'Error: {str(e)}', 
+                ha='center', va='center', fontsize=14, color='red')
+        ax.set_title('Error Processing Data', fontsize=14, fontweight='bold')
+        
+        return empty_df, fig
+
+def plot_merged_training_data(appointments_df, influenza_df):
+    """
+    Create visualization of merged appointments and influenza data.
+    
+    Parameters:
+    -----------
+    appointments_df : pd.DataFrame
+        Weekly appointments data with columns ['week', 'appointments']
+    influenza_df : pd.DataFrame
+        Influenza data with columns ['date', 'influenza']
+        
+    Returns:
+    --------
+    matplotlib.figure.Figure
+        Dual-axis plot showing appointments and influenza over time
+    pd.DataFrame
+        Merged dataframe with both appointments and influenza
+    """
+    try:
+        # Prepare appointments data
+        df_apps = appointments_df.copy()
+        df_apps['week'] = pd.to_datetime(df_apps['week'])
+        
+        # Prepare influenza data - aggregate to weekly
+        df_flu = influenza_df.copy()
         df_flu['date'] = pd.to_datetime(df_flu['date'])
+        df_flu = df_flu.set_index('date')
+        df_flu_weekly = df_flu.resample('W')['influenza'].mean().reset_index()
+        df_flu_weekly.columns = ['week', 'influenza']
         
-        # Aggregate to weekly if needed
-        df_flu['week'] = df_flu['date'].dt.to_period('W').dt.start_time
-        df_flu_weekly = df_flu.groupby('week')['influenza'].mean().reset_index()
-        
-        # Fill missing weeks in influenza data too
+        # Fill missing weeks in influenza
         min_week_flu = df_flu_weekly['week'].min()
         max_week_flu = df_flu_weekly['week'].max()
         complete_weeks_flu = pd.date_range(start=min_week_flu, end=max_week_flu, freq='W')
         complete_df_flu = pd.DataFrame({'week': complete_weeks_flu})
         df_flu_weekly = complete_df_flu.merge(df_flu_weekly, on='week', how='left')
-        # Forward fill influenza values (use last known value for gaps)
         df_flu_weekly['influenza'] = df_flu_weekly['influenza'].ffill().bfill()
-        print(f"Influenza data: {len(df_flu_weekly)} complete weeks")
         
-        ts_flu_full = TimeSeries.from_dataframe(
-            df_flu_weekly, 
+        # Merge appointments and influenza on week
+        merged_df = df_apps.merge(df_flu_weekly, on='week', how='inner')
+        
+        # Create dual-axis plot
+        fig, ax1 = plt.subplots(figsize=(16, 4))
+        
+        # Plot appointments on primary axis
+        color1 = '#1f77b4'
+        ax1.set_xlabel('Week', fontsize=12)
+        ax1.set_ylabel('Appointments', color=color1, fontsize=12)
+        ax1.plot(merged_df['week'], merged_df['appointments'], 
+                color=color1, linewidth=2, label='Appointments')
+        ax1.tick_params(axis='y', labelcolor=color1)
+        ax1.grid(True, alpha=0.3, linestyle='--')
+        
+        # Create secondary axis for influenza
+        ax2 = ax1.twinx()
+        color2 = '#ff7f0e'
+        ax2.set_ylabel('Influenza Level', color=color2, fontsize=12)
+        ax2.plot(merged_df['week'], merged_df['influenza'], 
+                color=color2, linewidth=2, linestyle='-', label='Influenza')
+        ax2.tick_params(axis='y', labelcolor=color2)
+        
+        # Title and legend
+        plt.title(f'Merged Training Data: Appointments & Influenza Over Time\n'
+                 f'{len(merged_df)} weeks | {merged_df["week"].min().date()} to {merged_df["week"].max().date()}',
+                 fontsize=14, fontweight='bold', pad=20)
+        
+        # Combine legends from both axes
+        lines1, labels1 = ax1.get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper left', fontsize=10)
+        
+        plt.tight_layout()
+        
+        print(f"\n✅ Created merged visualization: {len(merged_df)} weeks")
+        
+        return fig, merged_df
+        
+    except Exception as e:
+        print(f"\n❌ Error creating merged visualization: {str(e)}")
+        
+        # Return empty figure on error
+        fig, ax = plt.subplots(figsize=(12, 6))
+        ax.text(0.5, 0.5, f'Error: {str(e)}', 
+                ha='center', va='center', fontsize=14, color='red')
+        ax.set_title('Error Creating Merged Plot', fontsize=14, fontweight='bold')
+        
+        empty_df = pd.DataFrame(columns=['week', 'appointments', 'influenza'])
+        return fig, empty_df
+
+
+def merge_and_prepare_training_data(appointments_df, influenza_df):
+    """
+    Merge historic appointments and influenza data, create multivariate TimeSeries.
+    
+    This function takes preprocessed data from process_historic_app_data() and 
+    process_influenza_data(), merges them on weekly timestamps, and creates a
+    multivariate Darts TimeSeries ready for training.
+    
+    Parameters:
+    -----------
+    appointments_df : pd.DataFrame
+        Weekly appointments data with columns ['week', 'appointments']
+        Output from process_historic_app_data()
+    influenza_df : pd.DataFrame
+        Influenza data with columns ['date', 'influenza']
+        Output from process_influenza_data()
+        
+    Returns:
+    --------
+    TimeSeries
+        Multivariate Darts TimeSeries with [appointments, influenza]
+    dict
+        Metadata about the created dataset
+    """
+    try:
+        print("\n" + "="*60)
+        print("MERGING TRAINING DATA")
+        print("="*60)
+        
+        # 1. Prepare appointments data
+        df_apps = appointments_df.copy()
+        df_apps['week'] = pd.to_datetime(df_apps['week'])
+        print(f"\n📊 Appointments Data:")
+        print(f"  Weeks: {len(df_apps)}")
+        print(f"  Date range: {df_apps['week'].min()} to {df_apps['week'].max()}")
+        
+        # 2. Prepare influenza data - aggregate to weekly
+        df_flu = influenza_df.copy()
+        df_flu['date'] = pd.to_datetime(df_flu['date'])
+        
+        # Resample influenza to weekly (week ending Sunday)
+        df_flu = df_flu.set_index('date')
+        df_flu_weekly = df_flu.resample('W')['influenza'].mean().reset_index()
+        df_flu_weekly.columns = ['week', 'influenza']
+        
+        # Fill missing weeks
+        min_week_flu = df_flu_weekly['week'].min()
+        max_week_flu = df_flu_weekly['week'].max()
+        complete_weeks_flu = pd.date_range(start=min_week_flu, end=max_week_flu, freq='W')
+        complete_df_flu = pd.DataFrame({'week': complete_weeks_flu})
+        df_flu_weekly = complete_df_flu.merge(df_flu_weekly, on='week', how='left')
+        df_flu_weekly['influenza'] = df_flu_weekly['influenza'].ffill().bfill()
+        
+        print(f"\n🦠 Influenza Data:")
+        print(f"  Weeks: {len(df_flu_weekly)}")
+        print(f"  Date range: {df_flu_weekly['week'].min()} to {df_flu_weekly['week'].max()}")
+        
+        # 3. Merge appointments and influenza on week
+        merged_df = df_apps.merge(df_flu_weekly, on='week', how='inner')
+        print(f"\n🔗 Merged Data:")
+        print(f"  Total weeks: {len(merged_df)}")
+        print(f"  Date range: {merged_df['week'].min()} to {merged_df['week'].max()}")
+        
+        if len(merged_df) == 0:
+            raise ValueError("No overlapping weeks between appointments and influenza data")
+        
+       # 4. Create Darts TimeSeries for appointments
+        ts_appointments = TimeSeries.from_dataframe(
+            merged_df[['week', 'appointments']], 
+            time_col='week', 
+            value_cols='appointments', 
+            freq='W'
+        )
+        
+        # 5. Create Darts TimeSeries for influenza
+        ts_influenza = TimeSeries.from_dataframe(
+            merged_df[['week', 'influenza']], 
             time_col='week', 
             value_cols='influenza', 
             freq='W'
         )
         
-        # 6. Slice the influenza data to match the appointment start/end dates
-        ts_flu_clipped = ts_flu_full.slice_intersect(ts_appointments)
+        # 6. Stack into multivariate series [appointments, influenza]
+        train_ts = ts_appointments.stack(ts_influenza)
         
-        # 7. Combine into a multivariate series
-        # This creates a single object where each timestamp has 2 components: [appointments, influenza]
-        train_ts = ts_appointments.stack(ts_flu_clipped)
-        
-        # 8. Create metadata (store original appointment series for plotting)
+        # 7. Create metadata
         metadata = {
             'success': True,
             'total_weeks': len(train_ts),
             'start_date': train_ts.start_time(),
             'end_date': train_ts.end_time(),
-            'training_weeks': len(ts_appts_1),
-            'current_weeks': len(ts_appts_2),
+            'training_weeks': len(merged_df),  # Total merged weeks
+            'current_weeks': 0,  # Not applicable in this workflow
             'components': train_ts.components.tolist(),
-            'message': f'Successfully created training dataset with {len(train_ts)} weeks',
-            'appointments_series': ts_appointments  # Store complete appointments for plotting
+            'message': f'Successfully merged {len(train_ts)} weeks of data',
+            'appointments_series': ts_appointments  # Store for plotting
         }
         
-        print(f"✓ Training dataset created: {len(train_ts)} weeks")
-        print(f"  - Historical training: {len(ts_appts_1)} weeks (up to {end_cutoff.date()})")
-        print(f"  - Current data: {len(ts_appts_2)} weeks (from {start_date.date()})")
-        print(f"  - Date range: {train_ts.start_time()} to {train_ts.end_time()}")
-        print(f"  - Components: {train_ts.components.tolist()}")
+        print(f"\n✅ Training Dataset Created:")
+        print(f"  Total weeks: {len(train_ts)}")
+        print(f"  Date range: {train_ts.start_time()} to {train_ts.end_time()}")
+        print(f"  Components: {train_ts.components.tolist()}")
+        print("="*60 + "\n")
         
         return train_ts, metadata
         
     except Exception as e:
-        print(f"Error creating training dataset: {str(e)}")
+        print(f"\n❌ Error merging training data: {str(e)}\n")
         metadata = {
             'success': False,
             'message': f'Error: {str(e)}',
@@ -331,7 +515,34 @@ def train_nbeats_model_with_covariates(
         print("-" * 60)
         print(f"✅ Training Complete!")
         
-        # 8. Create result dictionary
+        # 8. Calculate validation metrics
+        print(f"\n📊 Calculating Validation Metrics...")
+        
+        # Limit validation prediction to output_chunk_length (we don't have future covariates beyond that)
+        val_pred_length = min(val_length, output_chunk_length)
+        
+        # Get validation data (last val_pred_length weeks)
+        val_target = target_series[-val_pred_length:]
+        
+        # Generate predictions on validation set (limited to output_chunk_length)
+        val_pred_scaled = model.predict(
+            n=val_pred_length,
+            series=target_series[:-val_pred_length],
+            past_covariates=covariate_series[:-val_pred_length]
+        )
+        
+        # Calculate metrics on scaled data
+        val_smape = smape(val_target, val_pred_scaled)
+        val_mape = mape(val_target, val_pred_scaled)
+        val_rmse = rmse(val_target, val_pred_scaled)
+        val_mae = mae(val_target, val_pred_scaled)
+        
+        print(f"  sMAPE: {val_smape:.2f}%")
+        print(f"  MAPE: {val_mape:.2f}%")
+        print(f"  RMSE: {val_rmse:.4f}")
+        print(f"  MAE: {val_mae:.4f}")
+        
+        # 9. Create result dictionary
         result = {
             'success': True,
             'model': model,
@@ -343,7 +554,13 @@ def train_nbeats_model_with_covariates(
             'validation_weeks': val_length,
             'input_chunk_length': input_chunk_length,
             'output_chunk_length': output_chunk_length,
-            'message': f'Model trained successfully on {len(target_series)} weeks'
+            'message': f'Model trained successfully on {len(target_series)} weeks',
+            'metrics': {
+                'smape': float(val_smape),
+                'mape': float(val_mape),
+                'rmse': float(val_rmse),
+                'mae': float(val_mae)
+            }
         }
         
         print(f"\n📦 Model Package Created:")
@@ -351,6 +568,7 @@ def train_nbeats_model_with_covariates(
         print(f"  ✓ Target scaler")
         print(f"  ✓ Covariate scaler")
         print(f"  ✓ Scaled time series")
+        print(f"  ✓ Validation metrics")
         print("="*60 + "\n")
         
         return result
@@ -366,7 +584,7 @@ def train_nbeats_model_with_covariates(
 
 def forecast_nbeats_model(
     trained_result,
-    forecast_weeks=4,
+    forecast_weeks=12,
     future_covariates_df=None
 ):
     """
@@ -389,6 +607,51 @@ def forecast_nbeats_model(
     
     if not trained_result or not trained_result.get('success'):
         print("❌ No trained model available")
+        return None
+    
+    try:
+        print(f"\n🔮 Generating {forecast_weeks}-week forecast...")
+        
+        model = trained_result['model']
+        target_scaler = trained_result['target_scaler']
+        covariate_scaler = trained_result['covariate_scaler']
+        target_series = trained_result['target_series']
+        covariate_series = trained_result['covariate_series']
+        
+        # Extend covariate series if future data provided
+        if future_covariates_df is not None:
+            print(f"  Using provided future covariate data")
+            # TODO: Implement future covariate extension
+        
+        # Generate forecast
+        forecast_scaled = model.predict(
+            n=forecast_weeks,
+            series=target_series,
+            past_covariates=covariate_series
+        )
+        
+        # Inverse transform
+        forecast = target_scaler.inverse_transform(forecast_scaled)
+        
+        # Convert to DataFrame using values() and time_index
+        forecast_df = pd.DataFrame({
+            'week': forecast.time_index,
+            'forecasted_appointments': forecast.values().flatten()
+        })
+        
+        # Round and clip values
+        forecast_df['forecasted_appointments'] = forecast_df['forecasted_appointments'].round(0).clip(lower=0).astype(int)
+        
+        print(f"✅ Forecast generated successfully")
+        print(f"  Date range: {forecast_df['week'].min()} to {forecast_df['week'].max()}")
+        print(f"  Mean forecast: {forecast_df['forecasted_appointments'].mean():.0f} appointments/week\n")
+        
+        return forecast_df
+        
+    except Exception as e:
+        print(f"❌ Forecasting error: {str(e)}\n")
+        import traceback
+        traceback.print_exc()
         return None
 
 

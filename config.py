@@ -6,7 +6,7 @@ Contains all constants, thresholds, and configuration values
 import pandas as pd
 
 # Page Configuration
-PAGE_TITLE = "Access ES - Appointment Tracker"
+PAGE_TITLE = "Access ES Tracker"
 PAGE_ICON = ":material/switch_access_shortcut_add:"
 PAGE_LAYOUT = "wide"
 
@@ -61,7 +61,7 @@ MONTHLY_PLOT_HEIGHT = 400
 PROJECTION_PLOT_HEIGHT = 400
 
 # Required Columns
-REQUIRED_COLUMNS = ['appointment_date', 'clinician', 'appointment_status', 'rota_type']
+REQUIRED_COLUMNS = ['appointment_date', 'clinician', 'appointment_status', 'rota_type', 'patient_id']
 
 # Column Name Mappings
 COLUMN_RENAMES = {

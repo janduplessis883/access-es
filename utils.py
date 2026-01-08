@@ -77,9 +77,13 @@ def preprocess_dataframe(df):
         # Convert duration columns
         if 'duration' in df.columns:
             df['duration'] = extract_duration_minutes(df['duration'])
+        else:
+            df['duration'] = 0
         
         if 'book_to_app' in df.columns:
             df['book_to_app'] = extract_duration_minutes(df['book_to_app'])
+        else:
+            df['book_to_app'] = 0
         
         return df, rows_dropped
     

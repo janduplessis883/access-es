@@ -1,15 +1,10 @@
-"""
-Access ES - Appointment Tracker
-Refactored version using modular architecture
-"""
-
 import streamlit as st
 import pandas as pd
 import io
 from config import *
 from utils import *
 from plots import *
-from nbeats_forecasting import create_training_dataset, train_nbeats_model_with_covariates, forecast_nbeats_model, plot_validation_and_forecast
+from nbeats_forecasting import merge_and_prepare_training_data, train_nbeats_model_with_covariates, forecast_nbeats_model, plot_validation_and_forecast, process_influenza_data, process_historic_app_data, plot_merged_training_data
 from forecast_appointments import forecast_surgery_appointments
 from train_model import prepare_training_data, train_nbeats_model, forecast_with_trained_model
 
@@ -27,7 +22,7 @@ st.caption(
     "To ensure accurate results complete all the **settings** in the **sidebar**. "
     "Especially ARRS up to the date this value has been supplied by the ICB."
 )
-st.logo("logo.png", size="small")
+st.logo("images/logo.png", size="small")
 
 # Sidebar Configuration
 with st.sidebar:
@@ -42,10 +37,10 @@ with st.sidebar:
     )
     
     # Processing Options
-    drop_duplicates = st.toggle("Drop Duplicate Entries", value=True)
+    drop_duplicates = st.toggle("Drop Duplicate Entries", value=False)
     exclude_did_not_attend = st.toggle(
         "Exclude 'Did Not Attend'",
-        value=False,
+        value=True,
         help="Filter out appointments with **'Did Not Attend'** status"
     )
     
@@ -221,7 +216,7 @@ with st.sidebar:
         )
 
         # Train button
-        if st.button("Train NBEats Model", type="primary", use_container_width=True, icon=":material/rocket_launch:"):
+        if st.button("Load Training Data", type="primary", use_container_width=True, icon=":material/rocket_launch:"):
             st.session_state['train_model'] = True
         else:
             if 'train_model' not in st.session_state:
@@ -235,9 +230,9 @@ with st.sidebar:
     
     # Display Options
     show_dataframe = st.checkbox(
-        ":material/table: Show DataFrame",
+        ":material/bug_report: Debug + Export Mode",
         value=False,
-        help="Display the filtered dataframe below the scatter plot"
+        help="Display debug expander with calculations and dataframes."
     )
 
 # Main Content Area
@@ -443,145 +438,27 @@ if uploaded_files:
                     st.session_state['train_model'] = False
                     st.rerun()
                 
-                # Generate and Display Training Dataset
-                if training_files and len(training_files) > 0:
-                    # Auto-expand if model is trained or training dataset is ready
-                    expand_training = st.session_state.get('nbeats_model_trained', False) or st.session_state.get('train_ts') is not None
-                    with st.expander("Training Dataset Preview", icon=":material/school:", expanded=expand_training):
-                        st.subheader(":material/school: Training Dataset")
-                        st.caption("Preview of combined training dataset prepared for NBEats model")
-                        
-                        try:
-                            # Load training files
-                            training_dfs = []
-                            for idx, file in enumerate(training_files):
-                                file.seek(0)  # Reset file pointer to beginning
-                                df = pd.read_csv(file)
-                                st.write(f"File {idx+1} ({file.name}): Loaded {len(df)} rows")
-                                training_dfs.append(df)
-                            
-                            if training_dfs:
-                                combined_training = pd.concat(training_dfs, ignore_index=True)
-                                st.success(f"✓ Loaded {len(training_dfs)} training files with {len(combined_training)} total rows")
-                                
-                                # Generate training dataset
-                                with st.spinner("Preparing training dataset..."):
-                                    train_ts, metadata = create_training_dataset(
-                                        training_df=combined_training,
-                                        weekly_agg_df=weekly_agg,
-                                        date_column=date_column_name,
-                                        app_column=appointments_column_name,
-                                        influenza_csv_path='data/influenza.csv',
-                                        training_cutoff_date='2025-03-30',
-                                        current_start_date='2025-04-06'
-                                    )
-                                
-                                if metadata['success']:
-                                    # Display metadata
-                                    col1, col2, col3, col4 = st.columns(4)
-                                    with col1:
-                                        st.metric("Total Weeks", metadata['total_weeks'])
-                                    with col2:
-                                        st.metric("Training Weeks", metadata['training_weeks'])
-                                    with col3:
-                                        st.metric("Current Weeks", metadata['current_weeks'])
-                                    with col4:
-                                        st.metric("Components", len(metadata['components']))
-                                    
-                                    st.info(f"Date Range: {metadata['start_date']} to {metadata['end_date']}")
-                                    st.badge(f"Components: {', '.join(metadata['components'])}", color='blue')
-                                    
-                                    # Store train_ts in session state for training
-                                    st.session_state['train_ts'] = train_ts
-                                    st.session_state['training_metadata'] = metadata
-                                    
-                                    # Train Model Button
-                                    st.divider()
-                                    if st.button("Train NBEats Model", type="primary", use_container_width=True, key="train_nbeats_button"):
-                                        with st.spinner("Training NBEats Model... This may take several minutes..."):
-                                            trained_result = train_nbeats_model_with_covariates(
-                                                train_ts,
-                                                input_chunk_length=52,
-                                                output_chunk_length=12,
-                                                n_epochs=100
-                                            )
-                                            
-                                            if trained_result['success']:
-                                                st.session_state['nbeats_trained_model'] = trained_result
-                                                st.session_state['nbeats_model_trained'] = True
-                                                st.success(f"✅ NBEats Model Trained! {trained_result['training_weeks']} weeks used.")
-                                                st.rerun()
-                                            else:
-                                                st.error(f"❌ Training failed: {trained_result['message']}")
-                                    
-                                    # Show if model already trained
-                                    if st.session_state.get('nbeats_model_trained', False):
-                                        st.success("✅ NBEats model is trained and ready for forecasting!")
-                                        trained_result = st.session_state['nbeats_trained_model']
-                                        st.info(f"Training: {trained_result['training_weeks']} weeks | Validation: {trained_result['validation_weeks']} weeks")
-                                        
-                                        # Display Validation and Forecast Plot
-                                        st.divider()
-                                        st.markdown("#### 📈 Validation & Forecast Visualization")
-                                        with st.spinner("Generating visualization..."):
-                                            # Get training metadata for plotting
-                                            training_metadata = st.session_state.get('training_metadata', {})
-                                            fig_val_forecast = plot_validation_and_forecast(
-                                                trained_result,
-                                                training_metadata=training_metadata,
-                                                validation_weeks=12,
-                                                forecast_weeks=4
-                                            )
-                                            if fig_val_forecast is not None:
-                                                st.plotly_chart(fig_val_forecast, use_container_width=True)
-                                            else:
-                                                st.warning("Could not generate visualization")
-                                        
-                                        # Test Forecast Button
-                                        if st.button("🔮 Generate Test Forecast (12 weeks)", use_container_width=True):
-                                            with st.spinner("Generating forecast..."):
-                                                forecast_df = forecast_nbeats_model(trained_result, forecast_weeks=12)
-                                                if forecast_df is not None:
-                                                    st.success("✅ Forecast generated!")
-                                                    st.dataframe(forecast_df, hide_index=True, use_container_width=True)
-                                                else:
-                                                    st.error("❌ Forecast generation failed")
-                                    
-                                    # Convert TimeSeries to DataFrame for display
-                                    st.divider()
-                                    st.markdown("#### Training Dataset (First & Last 10 Weeks)")
-                                    
-                                    # Convert to DataFrame using values() and time_index
-                                    train_df = pd.DataFrame({
-                                        'week': train_ts.time_index,
-                                        'appointments': train_ts.univariate_component(0).values().flatten(),
-                                        'influenza': train_ts.univariate_component(1).values().flatten()
-                                    })
-                                    
-                                    # Show first 10 rows
-                                    st.markdown("**First 10 weeks:**")
-                                    st.dataframe(train_df.head(10), hide_index=True, use_container_width=True)
-                                    
-                                    # Show last 10 rows
-                                    st.markdown("**Last 10 weeks:**")
-                                    st.dataframe(train_df.tail(10), hide_index=True, use_container_width=True)
-                                    
-                                    # Download button for full dataset
-                                    csv_data = train_df.to_csv(index=False)
-                                    st.download_button(
-                                        label="📥 Download Full Training Dataset",
-                                        data=csv_data,
-                                        file_name="training_dataset.csv",
-                                        mime="text/csv"
-                                    )
-                                else:
-                                    st.error(f"❌ {metadata['message']}")
-                        
-                        except Exception as e:
-                            st.error(f"Error generating training dataset: {str(e)}")
                 
+                # Scatter Plot Visualization
+                with st.expander("Visualizations - Appointments Scatter Plot", icon=":material/scatter_plot:", expanded=False):
+                    st.subheader(":material/scatter_plot: Visualizations")
+                    
+                    fig = create_scatter_plot(filtered_df, plot_view_option, selected_clinicians)
+                    st.plotly_chart(fig, width='stretch')
+                    
+                    # Duration statistics
+                    st.badge(
+                        f"Average Appointment Length: **{filtered_df['duration'].mean():.2f} minutes** "
+                        f"max: {filtered_df['duration'].max():.2f} minutes ", icon=":material/health_cross:"
+                    )
+                    st.badge(
+                        f"Average Time Booking to Appointment: **{filtered_df['book_to_app'].mean():.2f} minutes** "
+                        f"max: {filtered_df['book_to_app'].max():.2f} minutes ", icon=":material/health_cross:"
+                    )  
+                    
+                                   
                 # Weekly & Monthly Trends
-                with st.expander("Visualizations - Weekly & Monthly Trends", icon=":material/bar_chart:", expanded=False):
+                with st.expander(":blue[Visualizations - Weekly & Monthly Trends]", icon=":material/bar_chart:", expanded=False):
                     st.subheader(":material/bar_chart: Weekly & Monthly Trends")
                     
                     
@@ -614,7 +491,7 @@ if uploaded_files:
                 # Data Statistics
                 expander_open = not show_dataframe
                 
-                with st.expander("**Data Statistics**", icon=":material/database:", expanded=expander_open):
+                with st.expander("**:blue[Data Statistics]**", icon=":material/database:", expanded=expander_open):
                     st.subheader(":material/database: Data Statistics")
                     
                     col1, col2 = st.columns([1, 6])
@@ -798,22 +675,7 @@ if uploaded_files:
                                     hide_index=True
                                 )
                 
-                # Scatter Plot Visualization
-                with st.expander("Visualizations - Appointments Scatter Plot", icon=":material/scatter_plot:", expanded=False):
-                    st.subheader(":material/scatter_plot: Visualizations")
-                    
-                    fig = create_scatter_plot(filtered_df, plot_view_option, selected_clinicians)
-                    st.plotly_chart(fig, width='stretch')
-                    
-                    # Duration statistics
-                    st.badge(
-                        f"Average Appointment Length: **{filtered_df['duration'].mean():.2f} minutes** "
-                        f"max: {filtered_df['duration'].max():.2f} minutes ", icon=":material/health_cross:"
-                    )
-                    st.badge(
-                        f"Average Time Booking to Appointment: **{filtered_df['book_to_app'].mean():.2f} minutes** "
-                        f"max: {filtered_df['book_to_app'].max():.2f} minutes ", icon=":material/health_cross:"
-                    )    
+  
             
                 # Clinician Stats
                 with st.expander("Clinician Stats", icon=":material/stethoscope:"):
@@ -848,125 +710,343 @@ if uploaded_files:
                 # Debug Information
                 expander_open_debug = show_dataframe
                 
-                with st.expander("Debug Information", icon=":material/bug_report:", expanded=expander_open_debug):
-                    if len(filtered_df) == 0:
-                        st.info(
-                            "### :material/info: No Data Selected\n"
-                            "Please select at least one **Clinician** and **Rota Type** "
-                            "to view debug information and calculations."
-                        )
-                    else:
-                        st.markdown("### :material/bug_report: Debug Info & Data Statistics")
-                        
-                        col1, col2, col3, col4 = st.columns(4)
-                        with col1:
-                            st.markdown(f"**Original Rows:** :orange[{len(combined_df)}]")
-                        with col2:
-                            st.markdown(f"**Filtered Rows:** :orange[{len(filtered_df)}]")
-                        with col3:
-                            st.markdown(f"**Columns:** :orange[{len(combined_df.columns)}]")
-                        with col4:
-                            st.markdown(f"**Files Loaded:** :orange[{len(file_info)}]")
-                        
-                        st.markdown("---")
-                        st.markdown("**File Details:**")
-                        for info in file_info:
-                            if info['success']:
-                                st.markdown(f"- `{info['name']}`: :orange[{info['rows']}] rows")
-                        
-                        st.divider()
-                        
-                        # Configuration details
-                        st.markdown("#### :material/settings: Input Configuration")
-                        col1, col2, col3, col4 = st.columns(4)
-                        with col1:
-                            st.markdown(f"**Weighted List Size:** :orange[{list_size}]")
-                        with col2:
-                            st.markdown(f"**ARRS Entered:** :orange[{arrs_2526}]")
-                        with col3:
-                            st.markdown(f"**Future ARRS:** :orange[{'Yes' if arrs_future else 'No'}]")
-                        with col4:
-                            st.markdown(f"**Exclude DNAs:** :orange[{'Yes' if exclude_did_not_attend else 'No'}]")
-                        
-                        st.divider()
-                        
-                        # Date range details
-                        st.markdown("#### :material/calendar_check: Date Range")
-                        col1, col2, col3, col4 = st.columns(4)
-                        with col1:
-                            st.markdown(f"**Slider Start:** :orange[{date_range[0]}]")
-                        with col2:
-                            st.markdown(f"**Slider End:** :orange[{date_range[1]}]")
-                        with col3:
-                            st.markdown(f"**Data Start:** :orange[{filtered_df['appointment_date'].min().date()}]")
-                        with col4:
-                            st.markdown(f"**Data End:** :orange[{filtered_df['appointment_date'].max().date()}]")
-                        
-                        st.divider()
-                        
-                        # Appointment counts
-                        st.markdown("#### :material/call: Appointment Counts")
-                        col1, col2, col3, col4 = st.columns(4)
-                        with col1:
-                            st.markdown(f"**Filtered Apps:** :orange[{len(filtered_df)}]")
-                        with col2:
-                            st.markdown(f"**ARRS Applied:** :orange[{arrs_2526}]")
-                        with col3:
-                            st.markdown(f"**Future ARRS Est:** :orange[{arrs_values['future_arrs_apps']}]")
-                        with col4:
-                            st.markdown(f"**Total + ARRS:** :orange[{total_apps_arrs}]")
-                        
-                        st.markdown("**Formula for Total Apps:**")
-                        st.code(
-                            f"total_apps_arrs = total_surgery_apps ({total_surgery_apps}) + "
-                            f"arrs_2526 ({arrs_2526}) + future_arrs_apps ({arrs_values['future_arrs_apps']}) = "
-                            f"{total_apps_arrs}"
-                        )
-                        
-                        st.divider()
-                        
-                        # Time calculations
-                        st.markdown("#### :material/schedule: Time Calculations")
-                        col1, col2, col3 = st.columns(3)
-                        with col1:
-                            st.markdown(f"**Days in Range:** :orange[{time_metrics['time_diff_days']}]")
-                        with col2:
-                            st.markdown(f"**Weeks:** :orange[{time_metrics['weeks']:.2f}]")
-                        with col3:
-                            st.markdown(f"**Months:** :orange[{time_metrics['months']:.1f}]")
-                        
-                        st.markdown("**Formula for Weeks:**")
-                        st.code(f"weeks = time_diff ({time_metrics['time_diff_days']}) / 7 = {time_metrics['weeks']:.2f}")
-                        
-                        st.divider()
-                        
-                        # Final calculation
-                        st.markdown("#### :material/edit: Final Calculation")
-                        st.markdown(
-                            f"**Formula:** `({total_apps_arrs} ÷ {list_size}) × 1000 ÷ {time_metrics['safe_weeks']:.2f}` = "
-                            f":orange[{av_1000_week:.2f}] apps per 1000 per week"
-                        )
-                        
-                        if show_dataframe:
-                            st.divider()
-                            st.markdown("#### Dataframes")
-                            st.write("**filtered_df**")
-                            st.dataframe(filtered_df, width='stretch')
-                            st.write("**weekly_agg**")
-                            st.dataframe(weekly_agg, width='stretch')
-                            st.write("**monthly_agg**")
-                            st.dataframe(monthly_agg, width='stretch')
-                            st.caption('Access ES Tracker')
                 
-                # Download CSV
-                csv = combined_df.to_csv(index=False)
-                st.sidebar.download_button(
-                    label="Download Combined CSV",
-                    data=csv,
-                    file_name="combined_data.csv",
-                    mime="text/csv", type="secondary"
-                )
-            
+                # Generate and Display Training Dataset
+                if training_files and len(training_files) > 0:
+                    # Auto-expand if model is trained or training dataset is ready
+                    expand_training = st.session_state.get('nbeats_model_trained', False) or st.session_state.get('train_ts') is not None
+                    with st.expander("Training Dataset Preview", icon=":material/school:", expanded=expand_training):
+                        st.subheader(":material/school: Training Dataset")
+                        st.caption("Preview of combined training dataset prepared for NBEats model")
+                        
+                        try:
+                            # Load training files
+                            training_dfs = []
+                            for idx, file in enumerate(training_files):
+                                file.seek(0)  # Reset file pointer to beginning
+                                df = pd.read_csv(file)
+                                st.write(f"File {idx+1} ({file.name}): Loaded {len(df)} rows")
+                                training_dfs.append(df)
+                            
+                            if training_dfs:
+                                combined_training = pd.concat(training_dfs, ignore_index=True)
+                                st.success(f"✓ Loaded {len(training_dfs)} training files with {len(combined_training)} total rows")
+                                
+                                # Generate training dataset using new streamlined process
+                                with st.spinner("Preparing training dataset..."):
+                                    # Step 1: Process historic appointments
+                                    historic_df, _ = process_historic_app_data(
+                                        training_files,
+                                        date_column=date_column_name,
+                                        app_column=appointments_column_name
+                                    )
+                                    
+                                    # Step 2: Get influenza data
+                                    flu_df, _ = process_influenza_data()
+                                    
+                                    # Step 3: Merge and create multivariate TimeSeries
+                                    train_ts, metadata = merge_and_prepare_training_data(
+                                        historic_df,
+                                        flu_df
+                                    )
+                                
+                                if metadata['success']:
+                                    # Display metadata
+                                    col1, col2, col3, col4 = st.columns(4)
+                                    with col1:
+                                        st.metric("Total Weeks", metadata['total_weeks'])
+                                    with col2:
+                                        st.metric("Training Weeks", metadata['training_weeks'])
+                                    with col3:
+                                        st.metric("Current Weeks", metadata['current_weeks'])
+                                    with col4:
+                                        st.metric("Components", len(metadata['components']))
+                                    
+                                    st.info(f"Date Range: {metadata['start_date']} to {metadata['end_date']}")
+                                    st.badge(f"Components: {', '.join(metadata['components'])}", color='blue')
+                                    
+                                    # Store train_ts in session state for training
+                                    st.session_state['train_ts'] = train_ts
+                                    st.session_state['training_metadata'] = metadata
+                                    
+                                    # Train Model Button
+                                    st.divider()
+                                    if st.button("Train NBEats Model", type="primary", use_container_width=True, key="train_nbeats_button"):
+                                        with st.spinner("Training NBEats Model... This may take several minutes..."):
+                                            trained_result = train_nbeats_model_with_covariates(
+                                                train_ts,
+                                                input_chunk_length=52,
+                                                output_chunk_length=12,
+                                                n_epochs=100
+                                            )
+                                            
+                                            if trained_result['success']:
+                                                st.session_state['nbeats_trained_model'] = trained_result
+                                                st.session_state['nbeats_model_trained'] = True
+                                                st.success(f"✅ NBEats Model Trained! {trained_result['training_weeks']} weeks used.")
+                                                st.rerun()
+                                            else:
+                                                st.error(f"❌ Training failed: {trained_result['message']}")
+                                    
+                                    # Show if model already trained
+                                    if st.session_state.get('nbeats_model_trained', False):
+                                        st.success("✅ NBEats model is trained and ready for forecasting!")
+                                        trained_result = st.session_state['nbeats_trained_model']
+                                        st.info(f"Training: {trained_result['training_weeks']} weeks | Validation: {trained_result['validation_weeks']} weeks")
+                                        
+                                        # Display validation metrics
+                                        if 'metrics' in trained_result:
+                                            st.markdown("**Model Performance Metrics:**")
+                                            col1, col2, col3, col4 = st.columns(4)
+                                            with col1:
+                                                st.badge(f"sMAPE: {trained_result['metrics']['smape']:.2f}%", color='blue')
+                                            with col2:
+                                                st.badge(f"MAPE: {trained_result['metrics']['mape']:.2f}%", color='blue')
+                                            with col3:
+                                                st.badge(f"RMSE: {trained_result['metrics']['rmse']:.4f}", color='blue')
+                                            with col4:
+                                                st.badge(f"MAE: {trained_result['metrics']['mae']:.4f}", color='blue')
+                                        
+                                        # Display Validation and Forecast Plot
+                                        st.divider()
+                                        st.markdown("#### 📈 Validation & Forecast Visualization")
+                                        with st.spinner("Generating visualization..."):
+                                            # Get training metadata for plotting
+                                            training_metadata = st.session_state.get('training_metadata', {})
+                                            fig_val_forecast = plot_validation_and_forecast(
+                                                trained_result,
+                                                training_metadata=training_metadata,
+                                                validation_weeks=12,
+                                                forecast_weeks=12
+                                            )
+                                            if fig_val_forecast is not None:
+                                                st.plotly_chart(fig_val_forecast, use_container_width=True)
+                                            else:
+                                                st.warning("Could not generate visualization")
+                                        
+                                        # Test Forecast Button
+                                        if st.button("🔮 Generate Test Forecast (12 weeks)", use_container_width=True):
+                                            with st.spinner("Generating forecast..."):
+                                                forecast_df = forecast_nbeats_model(trained_result, forecast_weeks=12)
+                                                if forecast_df is not None:
+                                                    st.success("✅ Forecast generated!")
+                                                    st.dataframe(forecast_df, hide_index=True, use_container_width=True)
+                                                else:
+                                                    st.error("❌ Forecast generation failed")
+                                    
+                                    # Convert TimeSeries to DataFrame for display
+                                    st.divider()
+                                    st.markdown("#### Training Dataset (First & Last 10 Weeks)")
+                                    
+                                    # Convert to DataFrame using values() and time_index
+                                    train_df = pd.DataFrame({
+                                        'week': train_ts.time_index,
+                                        'appointments': train_ts.univariate_component(0).values().flatten(),
+                                        'influenza': train_ts.univariate_component(1).values().flatten()
+                                    })
+                                    
+                                    # Show first 10 rows
+                                    st.markdown("**First 10 weeks:**")
+                                    st.dataframe(train_df.head(10), hide_index=True, use_container_width=True)
+                                    
+                                    # Show last 10 rows
+                                    st.markdown("**Last 10 weeks:**")
+                                    st.dataframe(train_df.tail(10), hide_index=True, use_container_width=True)
+                                    
+                                    # Download button for full dataset
+                                    csv_data = train_df.to_csv(index=False)
+                                    st.download_button(
+                                        label="📥 Download Full Training Dataset",
+                                        data=csv_data,
+                                        file_name="training_dataset.csv",
+                                        mime="text/csv"
+                                    )
+                                else:
+                                    st.error(f"❌ {metadata['message']}")
+                        
+                        except Exception as e:
+                            st.error(f"Error generating training dataset: {str(e)}")
+ 
+                if show_dataframe:
+                    with st.expander(":yellow[Debug Information & Export CSV]", icon=":material/bug_report:", expanded=expander_open_debug):
+                        if len(filtered_df) == 0:
+                            st.info(
+                                "### :material/info: No Data Selected\n"
+                                "Please select at least one **Clinician** and **Rota Type** "
+                                "to view debug information and calculations."
+                            )
+                        else:
+                            with st.expander("Calculations", icon=":material/functions:", expanded=False):
+                                
+                                st.markdown("### :material/bug_report: Debug Info & Data Statistics")
+                                
+                                col1, col2, col3, col4 = st.columns(4)
+                                with col1:
+                                    st.markdown(f"**Original Rows:** :orange[{len(combined_df)}]")
+                                with col2:
+                                    st.markdown(f"**Filtered Rows:** :orange[{len(filtered_df)}]")
+                                with col3:
+                                    st.markdown(f"**Columns:** :orange[{len(combined_df.columns)}]")
+                                with col4:
+                                    st.markdown(f"**Files Loaded:** :orange[{len(file_info)}]")
+                                
+                                st.markdown("---")
+                                st.markdown("**File Details:**")
+                                for info in file_info:
+                                    if info['success']:
+                                        st.markdown(f"- `{info['name']}`: :orange[{info['rows']}] rows")
+                                
+                                st.divider()
+                                
+                                # Configuration details
+                                st.markdown("#### :material/settings: Input Configuration")
+                                col1, col2, col3, col4 = st.columns(4)
+                                with col1:
+                                    st.markdown(f"**Weighted List Size:** :orange[{list_size}]")
+                                with col2:
+                                    st.markdown(f"**ARRS Entered:** :orange[{arrs_2526}]")
+                                with col3:
+                                    st.markdown(f"**Future ARRS:** :orange[{'Yes' if arrs_future else 'No'}]")
+                                with col4:
+                                    st.markdown(f"**Exclude DNAs:** :orange[{'Yes' if exclude_did_not_attend else 'No'}]")
+                                
+                                st.divider()
+                                
+                                # Date range details
+                                st.markdown("#### :material/calendar_check: Date Range")
+                                col1, col2, col3, col4 = st.columns(4)
+                                with col1:
+                                    st.markdown(f"**Slider Start:** :orange[{date_range[0]}]")
+                                with col2:
+                                    st.markdown(f"**Slider End:** :orange[{date_range[1]}]")
+                                with col3:
+                                    st.markdown(f"**Data Start:** :orange[{filtered_df['appointment_date'].min().date()}]")
+                                with col4:
+                                    st.markdown(f"**Data End:** :orange[{filtered_df['appointment_date'].max().date()}]")
+                                
+                                st.divider()
+                                
+                                # Appointment counts
+                                st.markdown("#### :material/call: Appointment Counts")
+                                col1, col2, col3, col4 = st.columns(4)
+                                with col1:
+                                    st.markdown(f"**Filtered Apps:** :orange[{len(filtered_df)}]")
+                                with col2:
+                                    st.markdown(f"**ARRS Applied:** :orange[{arrs_2526}]")
+                                with col3:
+                                    st.markdown(f"**Future ARRS Est:** :orange[{arrs_values['future_arrs_apps']}]")
+                                with col4:
+                                    st.markdown(f"**Total + ARRS:** :orange[{total_apps_arrs}]")
+                                
+                                st.markdown("**Formula for Total Apps:**")
+                                st.code(
+                                    f"total_apps_arrs = total_surgery_apps ({total_surgery_apps}) + "
+                                    f"arrs_2526 ({arrs_2526}) + future_arrs_apps ({arrs_values['future_arrs_apps']}) = "
+                                    f"{total_apps_arrs}"
+                                )
+                                
+                                st.divider()
+                                
+                                # Time calculations
+                                st.markdown("#### :material/schedule: Time Calculations")
+                                col1, col2, col3 = st.columns(3)
+                                with col1:
+                                    st.markdown(f"**Days in Range:** :orange[{time_metrics['time_diff_days']}]")
+                                with col2:
+                                    st.markdown(f"**Weeks:** :orange[{time_metrics['weeks']:.2f}]")
+                                with col3:
+                                    st.markdown(f"**Months:** :orange[{time_metrics['months']:.1f}]")
+                                
+                                st.markdown("**Formula for Weeks:**")
+                                st.code(f"weeks = time_diff ({time_metrics['time_diff_days']}) / 7 = {time_metrics['weeks']:.2f}")
+                                
+                                st.divider()
+                                
+                                # Final calculation
+                                st.markdown("#### :material/edit: Final Calculation")
+                                st.markdown(
+                                    f"**Formula:** `({total_apps_arrs} ÷ {list_size}) × 1000 ÷ {time_metrics['safe_weeks']:.2f}` = "
+                                    f":orange[{av_1000_week:.2f}] apps per 1000 per week"
+                                )
+                            
+                            if show_dataframe:
+                 
+                                with st.expander("Dataframes - Current FY", icon=":material/database:", expanded=False):
+                                    st.markdown("#### :material/database: Dataframes")
+                                    # 🅾️ Rename colums to original names before display (Capitalized with spaces)
+                                    st.write("**filtered_df**")
+                                    st.dataframe(filtered_df, width='stretch', height=150)
+                                    st.write("**weekly_agg**")
+                                    st.dataframe(weekly_agg, width='stretch', height=150)
+                                    st.write("**monthly_agg**")
+                                    st.dataframe(monthly_agg, width='stretch', height=150)
+                                    st.caption('Access ES Tracker')
+                                    
+                                with st.expander("Training Data - Influenza TimeSeries", icon=":material/coronavirus:", expanded=False):
+                                    st.markdown("#### :material/coronavirus: Influenza TimeSeries")
+                                    inf, fig = process_influenza_data()
+                                    st.pyplot(fig) 
+                                    st.divider()
+                                    st.dataframe(inf, width='stretch', height=150) 
+                                    
+                                with st.expander("Training Data - Historic Appointment Data", icon=":material/database:", expanded=False):
+                                    st.markdown("#### :material/database: Historic Appointment Data")
+                                    if training_files and len(training_files) > 0:
+                                        historic_df, historic_fig = process_historic_app_data(
+                                            training_files, 
+                                            date_column=date_column_name, 
+                                            app_column=appointments_column_name
+                                        )
+                                        st.pyplot(historic_fig) 
+                                        st.divider()
+                                        st.dataframe(historic_df, width='stretch', height=200)
+                                    else:
+                                        st.info("⬆️ Upload training files in the sidebar to view historic appointment data")
+                                
+                                with st.expander("Training Data - Merged Appointments & Influenza", icon=":material/merge:", expanded=False):
+                                    st.markdown("#### :material/merge: Merged Training Data")
+                                    if training_files and len(training_files) > 0:
+                                        # Get historic appointments and influenza data
+                                        historic_df, _ = process_historic_app_data(
+                                            training_files, 
+                                            date_column=date_column_name, 
+                                            app_column=appointments_column_name
+                                        )
+                                        flu_df, _ = process_influenza_data()
+                                        
+                                        # Create merged visualization
+                                        merged_fig, merged_df = plot_merged_training_data(
+                                            historic_df,
+                                            flu_df
+                                        )
+                                        st.pyplot(merged_fig)
+                                        st.divider()
+                                        st.dataframe(merged_df, width='stretch', height=200)
+                                        
+                                        # Download merged data
+                                        csv_merged = merged_df.to_csv(index=False)
+                                        st.download_button(
+                                            label="📥 Download Merged Dataset",
+                                            data=csv_merged,
+                                            file_name="merged_training_data.csv",
+                                            mime="text/csv"
+                                        )
+                                    else:
+                                        st.info("⬆️ Upload training files in the sidebar to view merged training data")
+                                    
+                if show_dataframe:
+                    # 🅾️ Rename colums to original names before export
+                    csv = filtered_df.to_csv(index=False)
+                    st.sidebar.download_button(
+                        label="Download Filtered Data",
+                        data=csv,
+                        file_name="access_tracker_filtered_data.csv",
+                        mime="text/csv", type="secondary",
+                        icon=":material/download:",
+                        help="Use thie button to download your aggregated, filtered csv, good for filtering your training dataset before traiining."
+                    )
+                    
+
             else:
                 st.warning("Please select at least one clinician and rota type to display.")
         else:
