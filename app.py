@@ -715,8 +715,8 @@ if uploaded_files:
                 if training_files and len(training_files) > 0:
                     # Auto-expand if model is trained or training dataset is ready
                     expand_training = st.session_state.get('nbeats_model_trained', False) or st.session_state.get('train_ts') is not None
-                    with st.expander("Training Dataset Preview", icon=":material/school:", expanded=expand_training):
-                        st.subheader(":material/school: Training Dataset")
+                    with st.expander("Model Training", icon=":material/school:", expanded=expand_training):
+                        st.subheader(":material/school: Model Training")
                         st.caption("Preview of combined training dataset prepared for NBEats model")
                         
                         try:
@@ -725,7 +725,7 @@ if uploaded_files:
                             for idx, file in enumerate(training_files):
                                 file.seek(0)  # Reset file pointer to beginning
                                 df = pd.read_csv(file)
-                                st.write(f"File {idx+1} ({file.name}): Loaded {len(df)} rows")
+                  
                                 training_dfs.append(df)
                             
                             if training_dfs:
@@ -771,7 +771,7 @@ if uploaded_files:
                                     
                                     # Train Model Button
                                     st.divider()
-                                    if st.button("Train NBEats Model", type="primary", use_container_width=True, key="train_nbeats_button"):
+                                    if st.button("Train NBEats Model", type="primary", use_container_width=False, key="train_nbeats_button"):
                                         with st.spinner("Training NBEats Model... This may take several minutes..."):
                                             trained_result = train_nbeats_model_with_covariates(
                                                 train_ts,
@@ -836,7 +836,7 @@ if uploaded_files:
                                     
                                     # Convert TimeSeries to DataFrame for display
                                     st.divider()
-                                    st.markdown("#### Training Dataset (First & Last 10 Weeks)")
+                           
                                     
                                     # Convert to DataFrame using values() and time_index
                                     train_df = pd.DataFrame({
@@ -845,13 +845,8 @@ if uploaded_files:
                                         'influenza': train_ts.univariate_component(1).values().flatten()
                                     })
                                     
-                                    # Show first 10 rows
-                                    st.markdown("**First 10 weeks:**")
-                                    st.dataframe(train_df.head(10), hide_index=True, use_container_width=True)
-                                    
-                                    # Show last 10 rows
-                                    st.markdown("**Last 10 weeks:**")
-                                    st.dataframe(train_df.tail(10), hide_index=True, use_container_width=True)
+         
+                                
                                     
                                     # Download button for full dataset
                                     csv_data = train_df.to_csv(index=False)

@@ -521,21 +521,27 @@ def train_nbeats_model_with_covariates(
         # Limit validation prediction to output_chunk_length (we don't have future covariates beyond that)
         val_pred_length = min(val_length, output_chunk_length)
         
-        # Get validation data (last val_pred_length weeks)
-        val_target = target_series[-val_pred_length:]
+        # Get validation data - UNSCALED (last val_pred_length weeks)
+        val_target_unscaled = target_series[-val_pred_length:]
         
-        # Generate predictions on validation set (limited to output_chunk_length)
+        # Also get the scaled version for prediction
+        val_target_scaled = target_scaled[-val_pred_length:]
+        
+        # Generate SCALED predictions on validation set (limited to output_chunk_length)
         val_pred_scaled = model.predict(
             n=val_pred_length,
-            series=target_series[:-val_pred_length],
-            past_covariates=covariate_series[:-val_pred_length]
+            series=target_scaled[:-val_pred_length],
+            past_covariates=covariate_scaled[:-val_pred_length]
         )
         
-        # Calculate metrics on scaled data
-        val_smape = smape(val_target, val_pred_scaled)
-        val_mape = mape(val_target, val_pred_scaled)
-        val_rmse = rmse(val_target, val_pred_scaled)
-        val_mae = mae(val_target, val_pred_scaled)
+        # IMPORTANT: Inverse transform predictions to UNSCALED for metrics
+        val_pred_unscaled = target_scaler.inverse_transform(val_pred_scaled)
+        
+        # Calculate metrics on UNSCALED data (actual vs predicted appointments)
+        val_smape = smape(val_target_unscaled, val_pred_unscaled)
+        val_mape = mape(val_target_unscaled, val_pred_unscaled)
+        val_rmse = rmse(val_target_unscaled, val_pred_unscaled)
+        val_mae = mae(val_target_unscaled, val_pred_unscaled)
         
         print(f"  sMAPE: {val_smape:.2f}%")
         print(f"  MAPE: {val_mape:.2f}%")
