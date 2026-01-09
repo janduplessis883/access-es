@@ -438,7 +438,6 @@ if uploaded_files:
                     st.session_state['train_model'] = False
                     st.rerun()
                 
-                
                 # Scatter Plot Visualization
                 with st.expander("Visualizations - Appointments Scatter Plot", icon=":material/scatter_plot:", expanded=False):
                     st.subheader(":material/scatter_plot: Visualizations")
@@ -454,11 +453,12 @@ if uploaded_files:
                     st.badge(
                         f"Average Time Booking to Appointment: **{filtered_df['book_to_app'].mean():.2f} minutes** "
                         f"max: {filtered_df['book_to_app'].max():.2f} minutes ", icon=":material/health_cross:"
-                    )  
+                    )                  
                     
-                                   
+
+                    
                 # Weekly & Monthly Trends
-                with st.expander(":blue[Visualizations - Weekly & Monthly Trends]", icon=":material/bar_chart:", expanded=False):
+                with st.expander("Visualizations - Weekly & Monthly Trends", icon=":material/bar_chart:", expanded=False):
                     st.subheader(":material/bar_chart: Weekly & Monthly Trends")
                     
                     
@@ -491,7 +491,7 @@ if uploaded_files:
                 # Data Statistics
                 expander_open = not show_dataframe
                 
-                with st.expander("**:blue[Data Statistics]**", icon=":material/database:", expanded=expander_open):
+                with st.expander("**Data Statistics**", icon=":material/database:", expanded=expander_open):
                     st.subheader(":material/database: Data Statistics")
                     
                     col1, col2 = st.columns([1, 6])
@@ -674,8 +674,8 @@ if uploaded_files:
                                     width='stretch',
                                     hide_index=True
                                 )
-                
-  
+                st.space(size='small')
+
             
                 # Clinician Stats
                 with st.expander("Clinician Stats", icon=":material/stethoscope:"):
@@ -711,7 +711,7 @@ if uploaded_files:
                 expander_open_debug = show_dataframe
                 
                 
-                # Generate and Display Training Dataset
+                # Generate and Display Training Dataset -------------------------------------------------------------------------------------------------
                 if training_files and len(training_files) > 0:
                     # Auto-expand if model is trained or training dataset is ready
                     expand_training = st.session_state.get('nbeats_model_trained', False) or st.session_state.get('train_ts') is not None
@@ -733,7 +733,7 @@ if uploaded_files:
                                 st.success(f"✓ Loaded {len(training_dfs)} training files with {len(combined_training)} total rows")
                                 
                                 # Generate training dataset using new streamlined process
-                                with st.spinner("Preparing training dataset..."):
+                                with st.spinner("Preparing training dataset...", show_time=True):
                                     # Step 1: Process historic appointments
                                     historic_df, _ = process_historic_app_data(
                                         training_files,
@@ -762,7 +762,7 @@ if uploaded_files:
                                     with col4:
                                         st.metric("Components", len(metadata['components']))
                                     
-                                    st.info(f"Date Range: {metadata['start_date']} to {metadata['end_date']}")
+                                    st.badge(f"Date Range: {metadata['start_date']} to {metadata['end_date']}", color="blue")
                                     st.badge(f"Components: {', '.join(metadata['components'])}", color='blue')
                                     
                                     # Store train_ts in session state for training
@@ -809,7 +809,7 @@ if uploaded_files:
                                         
                                         # Display Validation and Forecast Plot
                                         st.divider()
-                                        st.markdown("#### 📈 Validation & Forecast Visualization")
+                                        st.markdown("#### Validation & Forecast Visualization")
                                         with st.spinner("Generating visualization..."):
                                             # Get training metadata for plotting
                                             training_metadata = st.session_state.get('training_metadata', {})
@@ -861,9 +861,9 @@ if uploaded_files:
                         
                         except Exception as e:
                             st.error(f"Error generating training dataset: {str(e)}")
- 
+                st.space(size='small')
                 if show_dataframe:
-                    with st.expander(":yellow[Debug Information & Export CSV]", icon=":material/bug_report:", expanded=expander_open_debug):
+                    with st.expander("Debug Information & Export CSV", icon=":material/bug_report:", expanded=expander_open_debug):
                         if len(filtered_df) == 0:
                             st.info(
                                 "### :material/info: No Data Selected\n"
@@ -977,14 +977,15 @@ if uploaded_files:
                                     st.dataframe(monthly_agg, width='stretch', height=150)
                                     st.caption('Access ES Tracker')
                                     
-                                with st.expander("Training Data - Influenza TimeSeries", icon=":material/coronavirus:", expanded=False):
+                                with st.expander("Training Data - TimeSeries Plots", icon=":material/coronavirus:", expanded=False):
                                     st.markdown("#### :material/coronavirus: Influenza TimeSeries")
                                     inf, fig = process_influenza_data()
                                     st.pyplot(fig) 
-                                    st.divider()
-                                    st.dataframe(inf, width='stretch', height=150) 
+                                    show_df = st.checkbox('Show df:', value=False, key="show-df3")
+                                    if show_df:
+                                        st.dataframe(inf, width='stretch', height=150) 
                                     
-                                with st.expander("Training Data - Historic Appointment Data", icon=":material/database:", expanded=False):
+
                                     st.markdown("#### :material/database: Historic Appointment Data")
                                     if training_files and len(training_files) > 0:
                                         historic_df, historic_fig = process_historic_app_data(
@@ -993,12 +994,13 @@ if uploaded_files:
                                             app_column=appointments_column_name
                                         )
                                         st.pyplot(historic_fig) 
-                                        st.divider()
-                                        st.dataframe(historic_df, width='stretch', height=200)
+                                        show_df = st.checkbox('Show df:', value=False, key="show-df2")
+                                        if show_df:
+                                            st.dataframe(historic_df, width='stretch', height=200)
                                     else:
                                         st.info("⬆️ Upload training files in the sidebar to view historic appointment data")
                                 
-                                with st.expander("Training Data - Merged Appointments & Influenza", icon=":material/merge:", expanded=False):
+
                                     st.markdown("#### :material/merge: Merged Training Data")
                                     if training_files and len(training_files) > 0:
                                         # Get historic appointments and influenza data
@@ -1015,13 +1017,14 @@ if uploaded_files:
                                             flu_df
                                         )
                                         st.pyplot(merged_fig)
-                                        st.divider()
-                                        st.dataframe(merged_df, width='stretch', height=200)
+                                        show_df = st.checkbox('Show df:', value=False, key="show-df1")
+                                        if show_df:
+                                            st.dataframe(merged_df, width='stretch', height=200)
                                         
                                         # Download merged data
                                         csv_merged = merged_df.to_csv(index=False)
                                         st.download_button(
-                                            label="📥 Download Merged Dataset",
+                                            label=":material/download: Download Merged Dataset",
                                             data=csv_merged,
                                             file_name="merged_training_data.csv",
                                             mime="text/csv"

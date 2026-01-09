@@ -42,7 +42,7 @@ def process_influenza_data():
     ax.set_title('Influenza Data Over Time', fontsize=14, fontweight='bold')
     ax.set_xlabel('Date', fontsize=12)
     ax.set_ylabel('Influenza Level', fontsize=12)
-    ax.grid(True, alpha=0.3)
+    ax.grid(True, alpha=0.3, linewidth=0.3)
     plt.tight_layout()
     
     return inf, fig
@@ -135,7 +135,7 @@ def process_historic_app_data(training_files, date_column='Appointment date', ap
         print(f"  Max per week: {weekly_df['appointments'].max()}")
         
         # 8. Create visualization
-        fig, ax = plt.subplots(figsize=(16, 4))
+        fig, ax = plt.subplots(figsize=(16, 3))
         
         # Main line plot
         sns.barplot(data=weekly_df, x='week', y='appointments', ax=ax, linewidth=2, color='#a33b54')
@@ -217,10 +217,10 @@ def plot_merged_training_data(appointments_df, influenza_df):
         merged_df = df_apps.merge(df_flu_weekly, on='week', how='inner')
         
         # Create dual-axis plot
-        fig, ax1 = plt.subplots(figsize=(16, 4))
+        fig, ax1 = plt.subplots(figsize=(18, 3))
         
         # Plot appointments on primary axis
-        color1 = '#1f77b4'
+        color1 = '#ab271f'
         ax1.set_xlabel('Week', fontsize=12)
         ax1.set_ylabel('Appointments', color=color1, fontsize=12)
         ax1.plot(merged_df['week'], merged_df['appointments'], 
@@ -230,7 +230,7 @@ def plot_merged_training_data(appointments_df, influenza_df):
         
         # Create secondary axis for influenza
         ax2 = ax1.twinx()
-        color2 = '#ff7f0e'
+        color2 = 'black'
         ax2.set_ylabel('Influenza Level', color=color2, fontsize=12)
         ax2.plot(merged_df['week'], merged_df['influenza'], 
                 color=color2, linewidth=2, linestyle='-', label='Influenza')
@@ -297,7 +297,7 @@ def merge_and_prepare_training_data(appointments_df, influenza_df):
         # 1. Prepare appointments data
         df_apps = appointments_df.copy()
         df_apps['week'] = pd.to_datetime(df_apps['week'])
-        print(f"\n📊 Appointments Data:")
+        print(f"\nAppointments Data:")
         print(f"  Weeks: {len(df_apps)}")
         print(f"  Date range: {df_apps['week'].min()} to {df_apps['week'].max()}")
         
@@ -318,7 +318,7 @@ def merge_and_prepare_training_data(appointments_df, influenza_df):
         df_flu_weekly = complete_df_flu.merge(df_flu_weekly, on='week', how='left')
         df_flu_weekly['influenza'] = df_flu_weekly['influenza'].ffill().bfill()
         
-        print(f"\n🦠 Influenza Data:")
+        print(f"\nInfluenza Data:")
         print(f"  Weeks: {len(df_flu_weekly)}")
         print(f"  Date range: {df_flu_weekly['week'].min()} to {df_flu_weekly['week'].max()}")
         
