@@ -354,20 +354,49 @@ def create_projection_dataframe(weekly_agg, target_metrics, arrs_values, exp_add
         freq='W-MON'
     )
     
+    # Create a mapping of week to forecast if available
+    forecast_map = {}
+    forecast_available = False
+    
+    if forecast_df is not None and 'week' in forecast_df.columns and len(forecast_df) > 0:
+        forecast_available = True
+        # Convert forecast weeks to datetime if needed
+        forecast_df_copy = forecast_df.copy()
+        if not pd.api.types.is_datetime64_any_dtype(forecast_df_copy['week']):
+            forecast_df_copy['week'] = pd.to_datetime(forecast_df_copy['week'])
+        
+        # Create mapping with better key handling
+        for _, row in forecast_df_copy.iterrows():
+            # Use week start (Monday) as key for consistency
+            week_key = pd.Timestamp(row['week']).to_period('W').start_time
+            forecast_map[week_key] = float(row['forecasted_appointments'])
+        
+        print(f"📊 Forecast mapping created: {len(forecast_map)} weeks")
+        print(f"   First forecast week: {min(forecast_map.keys())}")
+        print(f"   Last forecast week: {max(forecast_map.keys())}")
+    
     future_data = []
+    matched_count = 0
+    
     for w in future_weeks_list:
         remaining_gap = max(0, target_metrics['required_extra_per_week'] - exp_add_apps_per_week)
         
+        # Normalize to week start (Monday) for comparison
+        week_key = pd.Timestamp(w).to_period('W').start_time
+        
         # Use forecast if available, otherwise use average
-        if forecast_df is not None and w in forecast_df['week'].values:
-            forecasted_value = float(forecast_df[forecast_df['week'] == w]['forecasted_appointments'].iloc[0])
+        if week_key in forecast_map:
+            forecasted_value = forecast_map[week_key]
+            forecast_type = 'Forecasted'
+            matched_count += 1
         else:
             forecasted_value = target_metrics['avg_weekly_surgery']
+            forecast_type = 'Projected Baseline' if not forecast_available else 'Forecasted'
         
         future_data.append({
             'week': w,
             'total_appointments': forecasted_value,
-            'type': 'Forecasted' if forecast_df is not None else 'Projected Baseline',
+            'type': forecast_type,
             'ARRS': arrs_values['estimated_weekly_arrs'],
             'Added (Exp)': exp_add_apps_per_week,
             'Catch-up Needed': remaining_gap
@@ -376,6 +405,11 @@ def create_projection_dataframe(weekly_agg, target_metrics, arrs_values, exp_add
     if future_data:
         future_df = pd.DataFrame(future_data)
         combined_proj_df = pd.concat([proj_df, future_df], ignore_index=True)
+        
+        # Print matching summary
+        if forecast_available:
+            print(f"✅ Matched {matched_count} out of {len(future_weeks_list)} projection weeks with forecast data")
+        
         return combined_proj_df
     
     return proj_df

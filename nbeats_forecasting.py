@@ -48,7 +48,7 @@ def process_influenza_data():
     return inf, fig
 
 
-def process_historic_app_data(training_files, date_column='Appointment date', app_column='Appointment status'):
+def process_historic_app_data(training_files, filtered_df, date_column='appointment_date', app_column='appointment_status'):
     """
     Process uploaded historic training data files and create visualization.
     
@@ -103,7 +103,9 @@ def process_historic_app_data(training_files, date_column='Appointment date', ap
             raise ValueError(f"Column '{date_column}' not found. Available columns: {list(finished_df.columns)}")
         
         finished_df[date_column] = pd.to_datetime(finished_df[date_column])
-        
+        finished_df  = finished_df[finished_df['appointment_date'] < pd.Timestamp('2025-04-01')]
+        finished_df = pd.concat([finished_df, filtered_df], axis=0, ignore_index=True)
+        finished_df.sort_values(by='appointment_date', inplace=True)
         # 4. Set date as index for resampling
         finished_df = finished_df.set_index(date_column)
         

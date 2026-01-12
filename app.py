@@ -150,83 +150,13 @@ with st.sidebar:
     
     st.divider()
     
-    st.header(":material/robot_2: ML Forecasting")
-    with st.expander("Load Training Data", expanded=False, icon=":material/robot_2:"):
-        # ML Model Training Section
-        
-        st.caption("Train Nerual Network to predict future appointments demand.")
-        
+    # Model Training Toggle
+    show_model_training = st.toggle(
+        ":material/school: Show Model Training",
+        value=False,
+        help="Display the Model Training expander section for NBEats neural network training."
+    )
     
-        # Upload additional training data
-        training_files = st.file_uploader(
-            "Upload training dataset",
-            type="csv",
-            accept_multiple_files=True,
-            help="Prepare a dataset from **1 Jan 2022 - 30 April 2025** from the same search you used to create your initial dataset. After your run your search break down only to **Appointment date, Appointment Status, Patinet ID**.",
-            key="training_upload"
-        )
-    
-    
-        st.caption("Select columns from your training data")
-        
-        # Get column names from uploaded files or use defaults
-        available_columns = ["Date", "used_apps"]  # Defaults for historical data
-        
-        if training_files and len(training_files) > 0:
-            try:
-                # Read first uploaded file to get column names
-                first_file = training_files[0]
-                first_file.seek(0)  # Reset file pointer
-                sample_df = pd.read_csv(first_file)
-               
-                available_columns = list(sample_df.columns)
-                first_file.seek(0)  # Reset again for actual use
-                st.success(f"✓ Detected {len(available_columns)} columns from uploaded file")
-            except Exception as e:
-                st.warning(f"Could not read columns from uploaded file. Using defaults.")
-        else:
-            st.caption("Upload training data above to see available columns, or use defaults for historical data (2022-2025)")
-
-        # Find best default for date column
-        date_default_idx = 0
-        for idx, col in enumerate(available_columns):
-            if 'date' in col.lower():
-                date_default_idx = idx
-                break
-        
-        date_column_name = st.selectbox(
-            "Select Date column",
-            options=available_columns,
-            index=date_default_idx,
-            help="Select the column containing dates"
-        )
-    
-
-        # Find best default for appointments column
-        app_default_idx = min(1, len(available_columns) - 1)
-        for idx, col in enumerate(available_columns):
-            if any(keyword in col.lower() for keyword in ['app', 'count', 'used', 'total']):
-                app_default_idx = idx
-                break
-        
-        appointments_column_name = st.selectbox(
-            "Select Appointment Status Column",
-            options=available_columns,
-            index=app_default_idx,
-            help="Select the column containing appointment status (will filter for 'Finished')"
-        )
-
-        # Train button
-        if st.button("Load Training Data", type="primary", use_container_width=True, icon=":material/rocket_launch:"):
-            st.session_state['train_model'] = True
-        else:
-            if 'train_model' not in st.session_state:
-                st.session_state['train_model'] = False
-        
-        # Display training status
-        if 'model_trained' in st.session_state and st.session_state['model_trained']:
-            st.success(f"✅ Model trained! {st.session_state.get('training_weeks', 0)} weeks of data used.")
-      
     st.divider()
     
     # Display Options
@@ -401,44 +331,6 @@ if uploaded_files:
                     cutoff_date
                 )
                 
-                # Model Training Logic
-                if st.session_state.get('train_model', False):
-                    with st.spinner("🚀 Training NBEats model with historical data..."):
-                        # Prepare training data with user-specified column names
-                        training_data = prepare_training_data(
-                            filtered_df,
-                            training_data_path='data/traming_data.csv',
-                            additional_training_files=training_files,
-                            date_column=date_column_name,
-                            appointments_column=appointments_column_name
-                        )
-                        
-                        if training_data is not None:
-                            # Train the model
-                            trained_model = train_nbeats_model(
-                                training_data,
-                                influenza_csv_path='data/influenza.csv'
-                            )
-                            
-                            if trained_model['success']:
-                                st.session_state['trained_model'] = trained_model
-                                st.session_state['model_trained'] = True
-                                st.session_state['training_weeks'] = trained_model['training_weeks']
-                                st.success(
-                                    f"✅ Model trained successfully! {trained_model['training_weeks']} weeks of data used. "
-                                    f"Model ready for forecasting."
-                                )
-                            else:
-                                st.error(f"❌ Training failed: {trained_model['message']}")
-                                st.session_state['model_trained'] = False
-                        else:
-                            st.error("❌ Failed to prepare training data.")
-                            st.session_state['model_trained'] = False
-                    
-                    # Reset train flag
-                    st.session_state['train_model'] = False
-                    st.rerun()
-                
                 # Scatter Plot Visualization
                 with st.expander("Visualizations - Appointments Scatter Plot", icon=":material/scatter_plot:", expanded=False):
                     st.subheader(":material/scatter_plot: Visualizations")
@@ -605,11 +497,18 @@ if uploaded_files:
                         st.divider()
                         st.markdown("#### :material/bar_chart: Annual Projection (Weekly)")
                         
-                        # Generate forecasts using NBEats model
+                        # Check if there's a stored test forecast from the training section
                         forecast_df = None
                         
-                        # Check if trained model exists in session state
-                        if st.session_state.get('model_trained', False) and 'trained_model' in st.session_state:
+                        # First priority: Use the test forecast if available (from Generate Test Forecast button)
+                        if 'trajectory_forecast' in st.session_state:
+                            forecast_df = st.session_state['trajectory_forecast']
+                            st.success(
+                                f"🔮 Using **test forecast** from trained model. "
+                                f"Showing {len(forecast_df)} weeks of predictions."
+                            )
+                        # Second priority: Check if trained model exists for live forecasting
+                        elif st.session_state.get('model_trained', False) and 'trained_model' in st.session_state:
                             # Use trained model for forecasting
                             with st.spinner("Generating forecast with trained model..."):
                                 try:
@@ -669,7 +568,62 @@ if uploaded_files:
                         
                         # Show forecast details if available
                         if forecast_df is not None:
-                            with st.expander("View NBEats Forecast Details", expanded=False):
+                            with st.expander("View Forecast Details", expanded=False):
+                                # Calculate metrics for the forecast period
+                                total_forecast_apps = forecast_df['forecasted_appointments'].sum()
+                                num_forecast_weeks = len(forecast_df)
+                                avg_forecast_per_week = total_forecast_apps / num_forecast_weeks if num_forecast_weeks > 0 else 0
+                                avg_forecast_per_1000 = (avg_forecast_per_week / list_size) * 1000
+                                
+                                # Calculate total from historic data + forecast
+                                total_historic_apps = len(filtered_df)
+                                total_combined_apps = total_historic_apps + total_forecast_apps
+                                total_weeks = time_metrics['weeks'] + num_forecast_weeks
+                                avg_combined_per_1000 = (total_combined_apps / list_size) * 1000 / total_weeks
+                                
+                                # Calculate total surgery appointments per 1000 for entire period
+                                total_surgery_per_1000 = (total_combined_apps / list_size) * 1000
+                                
+                                # Calculate average weekly ARRS across entire period
+                                # ARRS for historic period (up to arrs_month)
+                                historic_weeks_with_arrs = time_metrics['weeks']
+                                historic_arrs = arrs_values['estimated_weekly_arrs'] * historic_weeks_with_arrs
+                                
+                                # ARRS for forecast period (future months)
+                                forecast_arrs = arrs_values['estimated_weekly_arrs'] * num_forecast_weeks
+                                
+                                # Total ARRS and average per week
+                                total_arrs = historic_arrs + forecast_arrs
+                                avg_weekly_arrs = total_arrs / total_weeks if total_weeks > 0 else 0
+                                avg_weekly_arrs_per_1000 = (avg_weekly_arrs / list_size) * 1000
+                                
+                                # Display metrics - Row 1
+                                st.markdown("**Forecast Period Metrics:**")
+                                col1, col2, col3, col4 = st.columns(4)
+                                with col1:
+                                    st.metric("Forecast Weeks", num_forecast_weeks)
+                                with col2:
+                                    st.metric("Avg Forecast/Week", f"{avg_forecast_per_week:.0f}")
+                                with col3:
+                                    st.metric("Forecast Apps/1000/Week", f"{avg_forecast_per_1000:.2f}")
+                                with col4:
+                                    st.metric("Combined Avg Apps/1000/Week", f"{avg_combined_per_1000:.2f}")
+                                
+                                # Display metrics - Row 2: Total Period Metrics
+                                st.markdown("**Total Period Metrics (Historic + Forecast):**")
+                                col1, col2, col3, col4 = st.columns(4)
+                                with col1:
+                                    st.metric("Total Surgery Apps", f"{total_combined_apps:,.0f}")
+                                with col2:
+                                    st.metric("Total Surgery Apps/1000", f"{total_surgery_per_1000:.2f}")
+                                with col3:
+                                    st.metric("Avg Weekly ARRS", f"{avg_weekly_arrs:.0f}")
+                                with col4:
+                                    st.metric("Avg Weekly ARRS/1000", f"{avg_weekly_arrs_per_1000:.2f}")
+                                
+                                st.caption(f"Combined period: {time_metrics['weeks']:.1f} weeks of historic data + {num_forecast_weeks} weeks of forecast = {total_weeks:.1f} total weeks")
+                                
+                                st.divider()
                                 st.dataframe(
                                     forecast_df.style.format({'forecasted_appointments': '{:.0f}'}),
                                     width='stretch',
@@ -713,155 +667,299 @@ if uploaded_files:
                 
                 
                 # Generate and Display Training Dataset -------------------------------------------------------------------------------------------------
-                if training_files and len(training_files) > 0:
+                if show_model_training:
                     # Auto-expand if model is trained or training dataset is ready
                     expand_training = st.session_state.get('nbeats_model_trained', False) or st.session_state.get('train_ts') is not None
                     with st.expander("Model Training", icon=":material/school:", expanded=expand_training):
                         st.subheader(":material/school: Model Training")
-                        st.caption("Preview of combined training dataset prepared for NBEats model")
+                        st.caption("Train Neural Network to predict future appointments demand.")
+                        
+                        # Upload additional training data
+                        training_files = st.file_uploader(
+                            "Upload training dataset",
+                            type="csv",
+                            accept_multiple_files=True,
+                            help="Prepare a dataset from **1 Jan 2022 - 30 April 2025** from the same search you used to create your initial dataset. After your run your search break down only to **Appointment date, Appointment Status, Patient ID**.",
+                            key="training_upload"
+                        )
+                        
+                        if not training_files or len(training_files) == 0:
+                            st.info("⬆️ Upload training dataset files above to begin model training.")
+                            st.stop()
+                        
+                        st.caption("Select columns from your training data")
+                        
+                        # Get column names from uploaded files or use defaults
+                        available_columns = ["Date", "used_apps"]  # Defaults for historical data
                         
                         try:
-                            # Load training files
-                            training_dfs = []
-                            for idx, file in enumerate(training_files):
-                                file.seek(0)  # Reset file pointer to beginning
-                                df = pd.read_csv(file)
-                  
-                                training_dfs.append(df)
+                            # Read first uploaded file to get column names
+                            first_file = training_files[0]
+                            first_file.seek(0)  # Reset file pointer
+                            sample_df = pd.read_csv(first_file)
+                           
+                            available_columns = list(sample_df.columns)
+                            first_file.seek(0)  # Reset again for actual use
+                            st.success(f"✓ Detected {len(available_columns)} columns from uploaded file")
+                        except Exception as e:
+                            st.warning(f"Could not read columns from uploaded file. Using defaults.")
+                        
+                        # Find best default for date column
+                        date_default_idx = 0
+                        for idx, col in enumerate(available_columns):
+                            if 'date' in col.lower():
+                                date_default_idx = idx
+                                break
+                        
+                        date_column_name = st.selectbox(
+                            "Select Date column",
+                            options=available_columns,
+                            index=date_default_idx,
+                            help="Select the column containing dates"
+                        )
+                        
+                        # Find best default for appointments column
+                        app_default_idx = min(1, len(available_columns) - 1)
+                        for idx, col in enumerate(available_columns):
+                            if any(keyword in col.lower() for keyword in ['app', 'count', 'used', 'total']):
+                                app_default_idx = idx
+                                break
+                        
+                        appointments_column_name = st.selectbox(
+                            "Select Appointment Status Column",
+                            options=available_columns,
+                            index=app_default_idx,
+                            help="Select the column containing appointment status (will filter for 'Finished')"
+                        )
+                        
+                        # Train button - Load training data only when clicked
+                        if st.button("Load Training Data", type="primary", use_container_width=True, icon=":material/rocket_launch:"):
+                            st.session_state['load_training_data'] = True
+                            # Clear any previously loaded data
+                            if 'train_ts' in st.session_state:
+                                del st.session_state['train_ts']
+                            if 'training_metadata' in st.session_state:
+                                del st.session_state['training_metadata']
+                        
+                        # Display training status
+                        if 'model_trained' in st.session_state and st.session_state['model_trained']:
+                            st.success(f"✅ Model trained! {st.session_state.get('training_weeks', 0)} weeks of data used.")
+                        
+                        st.divider()
+                        
+                        # Only process training data when button is clicked OR data already loaded
+                        should_process = st.session_state.get('load_training_data', False)
+                        data_already_loaded = 'train_ts' in st.session_state and st.session_state['train_ts'] is not None
+                        
+                        if should_process and not data_already_loaded:
+                            try:
+                                # Load training files
+                                training_dfs = []
+                                for idx, file in enumerate(training_files):
+                                    file.seek(0)  # Reset file pointer to beginning
+                                    df = pd.read_csv(file)
+                      
+                                    training_dfs.append(df)
+                                
+                                if training_dfs:
+                                    combined_training = pd.concat(training_dfs, ignore_index=True)
+                                    st.success(f"✓ Loaded {len(training_dfs)} training files with {len(combined_training)} total rows")
+                                    
+                                    # Generate training dataset using new streamlined process
+                                    with st.spinner("Preparing training dataset...", show_time=True):
+                                        # Step 1: Process historic appointments
+                                        historic_df, _ = process_historic_app_data(
+                                            training_files,
+                                            filtered_df,
+                                            date_column=date_column_name,
+                                            app_column=appointments_column_name
+                                        )
+                                        
+                                        # Step 2: Get influenza data
+                                        flu_df, _ = process_influenza_data()
+                                        
+                                        # Step 3: Merge and create multivariate TimeSeries
+                                        train_ts, metadata = merge_and_prepare_training_data(
+                                            historic_df,
+                                            flu_df
+                                        )
+                                    
+                                    if metadata['success']:
+                                        # Store in session state
+                                        st.session_state['train_ts'] = train_ts
+                                        st.session_state['training_metadata'] = metadata
+                                        st.session_state['load_training_data'] = False  # Reset flag
+                                        st.rerun()  # Rerun to show the loaded data
+                                    else:
+                                        st.error(f"❌ {metadata['message']}")
+                                        st.session_state['load_training_data'] = False
                             
-                            if training_dfs:
-                                combined_training = pd.concat(training_dfs, ignore_index=True)
-                                st.success(f"✓ Loaded {len(training_dfs)} training files with {len(combined_training)} total rows")
+                            except Exception as e:
+                                st.error(f"Error generating training dataset: {str(e)}")
+                                st.session_state['load_training_data'] = False
+                        
+                        # Display loaded training data if available
+                        if data_already_loaded:
+                            metadata = st.session_state.get('training_metadata', {})
+                            train_ts = st.session_state['train_ts']
+                            
+                            if metadata.get('success', False):
+                                # Display metadata
+                                col1, col2, col3, col4 = st.columns(4)
+                                with col1:
+                                    st.metric("Total Weeks", metadata['total_weeks'])
+                                with col2:
+                                    st.metric("Training Weeks", metadata['training_weeks'])
+                                with col3:
+                                    st.metric("Current Weeks", metadata['current_weeks'])
+                                with col4:
+                                    st.metric("Components", len(metadata['components']))
                                 
-                                # Generate training dataset using new streamlined process
-                                with st.spinner("Preparing training dataset...", show_time=True):
-                                    # Step 1: Process historic appointments
-                                    historic_df, _ = process_historic_app_data(
-                                        training_files,
-                                        date_column=date_column_name,
-                                        app_column=appointments_column_name
-                                    )
-                                    
-                                    # Step 2: Get influenza data
-                                    flu_df, _ = process_influenza_data()
-                                    
-                                    # Step 3: Merge and create multivariate TimeSeries
-                                    train_ts, metadata = merge_and_prepare_training_data(
-                                        historic_df,
-                                        flu_df
-                                    )
+                                st.badge(f"Date Range: {metadata['start_date']} to {metadata['end_date']}", color="blue")
+                                st.badge(f"Components: {', '.join(metadata['components'])}", color='blue')
                                 
-                                if metadata['success']:
-                                    # Display metadata
-                                    col1, col2, col3, col4 = st.columns(4)
-                                    with col1:
-                                        st.metric("Total Weeks", metadata['total_weeks'])
-                                    with col2:
-                                        st.metric("Training Weeks", metadata['training_weeks'])
-                                    with col3:
-                                        st.metric("Current Weeks", metadata['current_weeks'])
-                                    with col4:
-                                        st.metric("Components", len(metadata['components']))
+                                # Train Model Button
+                                st.divider()
+
+                                st.write("**Set Hyperparameters:**")
+                                col1, col2, col3, col4, col5 = st.columns(5)
+                                with col1:
+                                    input_chunk_length = st.number_input('input_chunk_length', min_value=1, max_value=156, step=1, value=52)
+                                with col2:
+                                    output_chunk_length = st.number_input('output_chunk_length', min_value=1, max_value=36, step=1, value=12)
+                                with col3:
+                                    n_epochs = st.number_input('n_epochs', min_value=10, max_value=200, step=10, value=100)
+                                with col4:
+                                    batch_size = st.number_input('batch_size', min_value=16, max_value=1024, step=8, value=32)
+                                with col5:
+                                    learning_rate = st.number_input('learning_rate', min_value=0.0005, max_value=0.1, step=0.0005, value=0.0005, format="%0.4f")
                                     
-                                    st.badge(f"Date Range: {metadata['start_date']} to {metadata['end_date']}", color="blue")
-                                    st.badge(f"Components: {', '.join(metadata['components'])}", color='blue')
+                                col1, col2, col3, col4, col5 = st.columns(5)
+                                with col1:
+                                    num_stacks = st.number_input('num_stacks', min_value=10, max_value=120, step=10, value=30)
+                                with col2:
+                                    num_blocks = st.number_input('num_blocks', min_value=1, max_value=10, step=1, value=1)
+                                with col3:
+                                    num_layers = st.number_input('num_layers', min_value=1, max_value=32, step=1, value=4)
+                                with col4:
+                                    layer_widths = st.number_input('layer_widths', min_value=32, max_value=2048, step=8, value=512)
+                                with col5:
+                                    validation_split = st.number_input('validation_split', min_value=0.1, max_value=0.8, step=0.1, value=0.2, format="%0.1f")
+                                        
+                                if st.button("Train NBEats Model", type="primary", use_container_width=False, key="train_nbeats_button"):
+                                    with st.spinner("Training NBEats Model... This may take several minutes...", show_time=True):
+                                        trained_result = train_nbeats_model_with_covariates(
+                                            train_ts,
+                                            input_chunk_length=input_chunk_length,
+                                            output_chunk_length=output_chunk_length,
+                                            n_epochs=n_epochs,
+                                            num_stacks=num_stacks,
+                                            num_blocks=num_blocks,
+                                            num_layers=num_layers,
+                                            layer_widths=layer_widths,
+                                            batch_size=batch_size,
+                                            learning_rate=learning_rate,
+                                            validation_split=validation_split
+                                        )
+                                        
+                                        if trained_result['success']:
+                                            st.session_state['nbeats_trained_model'] = trained_result
+                                            st.session_state['nbeats_model_trained'] = True
+                                            st.success(f"✅ NBEats Model Trained! {trained_result['training_weeks']} weeks used.")
+                                            st.rerun()
+                                        else:
+                                            st.error(f"❌ Training failed: {trained_result['message']}")
+                                
+                                # Show if model already trained
+                                if st.session_state.get('nbeats_model_trained', False):
+                                    st.success("✅ NBEats model is trained and ready for forecasting!")
+                                    trained_result = st.session_state['nbeats_trained_model']
+                                    st.info(f"Training: {trained_result['training_weeks']} weeks | Validation: {trained_result['validation_weeks']} weeks")
                                     
-                                    # Store train_ts in session state for training
-                                    st.session_state['train_ts'] = train_ts
-                                    st.session_state['training_metadata'] = metadata
+                                    # Display validation metrics
+                                    if 'metrics' in trained_result:
+                                        st.markdown("**Model Performance Metrics:**")
+                                        col1, col2, col3, col4 = st.columns(4)
+                                        with col1:
+                                            st.badge(f"sMAPE: {trained_result['metrics']['smape']:.2f}%", color='blue')
+                                        with col2:
+                                            st.badge(f"MAPE: {trained_result['metrics']['mape']:.2f}%", color='blue')
+                                        with col3:
+                                            st.badge(f"RMSE: {trained_result['metrics']['rmse']:.4f}", color='blue')
+                                        with col4:
+                                            st.badge(f"MAE: {trained_result['metrics']['mae']:.4f}", color='blue')
                                     
-                                    # Train Model Button
+                                    # Display Validation and Forecast Plot
                                     st.divider()
-                                    if st.button("Train NBEats Model", type="primary", use_container_width=False, key="train_nbeats_button"):
-                                        with st.spinner("Training NBEats Model... This may take several minutes...", show_time=True):
-                                            trained_result = train_nbeats_model_with_covariates(
-                                                train_ts,
-                                                input_chunk_length=52,
-                                                output_chunk_length=12,
-                                                n_epochs=100
-                                            )
-                                            
-                                            if trained_result['success']:
-                                                st.session_state['nbeats_trained_model'] = trained_result
-                                                st.session_state['nbeats_model_trained'] = True
-                                                st.success(f"✅ NBEats Model Trained! {trained_result['training_weeks']} weeks used.")
-                                                st.rerun()
-                                            else:
-                                                st.error(f"❌ Training failed: {trained_result['message']}")
+                                    st.markdown("#### Validation & Forecast Visualization")
+                                    with st.spinner("Generating visualization..."):
+                                        # Get training metadata for plotting
+                                        training_metadata = st.session_state.get('training_metadata', {})
+                                        fig_val_forecast = plot_validation_and_forecast(
+                                            trained_result,
+                                            training_metadata=training_metadata,
+                                            validation_weeks=12,
+                                            forecast_weeks=12
+                                        )
+                                        if fig_val_forecast is not None:
+                                            st.plotly_chart(fig_val_forecast, use_container_width=True)
+                                        else:
+                                            st.warning("Could not generate visualization")
                                     
-                                    # Show if model already trained
-                                    if st.session_state.get('nbeats_model_trained', False):
-                                        st.success("✅ NBEats model is trained and ready for forecasting!")
-                                        trained_result = st.session_state['nbeats_trained_model']
-                                        st.info(f"Training: {trained_result['training_weeks']} weeks | Validation: {trained_result['validation_weeks']} weeks")
-                                        
-                                        # Display validation metrics
-                                        if 'metrics' in trained_result:
-                                            st.markdown("**Model Performance Metrics:**")
-                                            col1, col2, col3, col4 = st.columns(4)
-                                            with col1:
-                                                st.badge(f"sMAPE: {trained_result['metrics']['smape']:.2f}%", color='blue')
-                                            with col2:
-                                                st.badge(f"MAPE: {trained_result['metrics']['mape']:.2f}%", color='blue')
-                                            with col3:
-                                                st.badge(f"RMSE: {trained_result['metrics']['rmse']:.4f}", color='blue')
-                                            with col4:
-                                                st.badge(f"MAE: {trained_result['metrics']['mae']:.4f}", color='blue')
-                                        
-                                        # Display Validation and Forecast Plot
-                                        st.divider()
-                                        st.markdown("#### Validation & Forecast Visualization")
-                                        with st.spinner("Generating visualization..."):
-                                            # Get training metadata for plotting
-                                            training_metadata = st.session_state.get('training_metadata', {})
-                                            fig_val_forecast = plot_validation_and_forecast(
-                                                trained_result,
-                                                training_metadata=training_metadata,
-                                                validation_weeks=12,
-                                                forecast_weeks=12
-                                            )
-                                            if fig_val_forecast is not None:
-                                                st.plotly_chart(fig_val_forecast, use_container_width=True)
-                                            else:
-                                                st.warning("Could not generate visualization")
-                                        
-                                        # Test Forecast Button
+                                    # Test Forecast Button - Store forecast for use in projection chart
+                                    col1, col2 = st.columns([1, 1])
+                                    with col1:
                                         if st.button("🔮 Generate Test Forecast (12 weeks)", use_container_width=True):
                                             with st.spinner("Generating forecast..."):
-                                                forecast_df = forecast_nbeats_model(trained_result, forecast_weeks=12)
-                                                if forecast_df is not None:
-                                                    st.success("✅ Forecast generated!")
-                                                    st.dataframe(forecast_df, hide_index=True, use_container_width=True)
+                                                test_forecast_df = forecast_nbeats_model(trained_result, forecast_weeks=12)
+                                                if test_forecast_df is not None:
+                                                    # Store in session state for use in projection chart
+                                                    st.session_state['trajectory_forecast'] = test_forecast_df
+                                                    st.success("✅ Forecast generated and added to trajectory chart!")
+                                                    st.rerun()
                                                 else:
                                                     st.error("❌ Forecast generation failed")
+                                    with col2:
+                                        if st.button("🗑️ Clear Forecast from Chart", use_container_width=True):
+                                            if 'trajectory_forecast' in st.session_state:
+                                                del st.session_state['trajectory_forecast']
+                                                st.success("✅ Forecast cleared from trajectory chart!")
+                                                st.rerun()
                                     
-                                    # Convert TimeSeries to DataFrame for display
-                                    st.divider()
-                           
-                                    
-                                    # Convert to DataFrame using values() and time_index
-                                    train_df = pd.DataFrame({
-                                        'week': train_ts.time_index,
-                                        'appointments': train_ts.univariate_component(0).values().flatten(),
-                                        'influenza': train_ts.univariate_component(1).values().flatten()
-                                    })
-                                    
-         
+                                    # Show current forecast if available
+                                    if 'trajectory_forecast' in st.session_state:
+                                        st.info("ℹ️ **Forecast is active** and shown in the Target Achievement Calculator chart above.")
+                                        with st.expander("View Forecast Data", expanded=False):
+                                            st.dataframe(
+                                                st.session_state['trajectory_forecast'],
+                                                hide_index=True,
+                                                use_container_width=True
+                                            )
                                 
-                                    
-                                    # Download button for full dataset
-                                    csv_data = train_df.to_csv(index=False)
-                                    st.download_button(
-                                        label="📥 Download Full Training Dataset",
-                                        data=csv_data,
-                                        file_name="training_dataset.csv",
-                                        mime="text/csv"
-                                    )
-                                else:
-                                    st.error(f"❌ {metadata['message']}")
-                        
-                        except Exception as e:
-                            st.error(f"Error generating training dataset: {str(e)}")
+                                # Convert TimeSeries to DataFrame for display
+                                st.divider()
+                       
+                                
+                                # Convert to DataFrame using values() and time_index
+                                train_df = pd.DataFrame({
+                                    'week': train_ts.time_index,
+                                    'appointments': train_ts.univariate_component(0).values().flatten(),
+                                    'influenza': train_ts.univariate_component(1).values().flatten()
+                                })
+                                
+     
+                            
+                                
+                                # Download button for full dataset
+                                csv_data = train_df.to_csv(index=False)
+                                st.download_button(
+                                    label="📥 Download Full Training Dataset",
+                                    data=csv_data,
+                                    file_name="training_dataset.csv",
+                                    mime="text/csv"
+                                )
+                            else:
+                                st.error(f"❌ {metadata['message']}")
                 st.space(size='small')
                 if show_dataframe:
                     with st.expander("Debug Information & Export CSV", icon=":material/bug_report:", expanded=expander_open_debug):
@@ -988,50 +1086,11 @@ if uploaded_files:
                                     
 
                                     st.markdown("#### :material/database: Historic Appointment Data")
-                                    if training_files and len(training_files) > 0:
-                                        historic_df, historic_fig = process_historic_app_data(
-                                            training_files, 
-                                            date_column=date_column_name, 
-                                            app_column=appointments_column_name
-                                        )
-                                        st.pyplot(historic_fig) 
-                                        show_df = st.checkbox('Show df:', value=False, key="show-df2")
-                                        if show_df:
-                                            st.dataframe(historic_df, width='stretch', height=200)
-                                    else:
-                                        st.info("⬆️ Upload training files in the sidebar to view historic appointment data")
+                                    st.info("Enable 'Show Model Training' in sidebar and upload training files to view this data.")
                                 
 
                                     st.markdown("#### :material/merge: Merged Training Data")
-                                    if training_files and len(training_files) > 0:
-                                        # Get historic appointments and influenza data
-                                        historic_df, _ = process_historic_app_data(
-                                            training_files, 
-                                            date_column=date_column_name, 
-                                            app_column=appointments_column_name
-                                        )
-                                        flu_df, _ = process_influenza_data()
-                                        
-                                        # Create merged visualization
-                                        merged_fig, merged_df = plot_merged_training_data(
-                                            historic_df,
-                                            flu_df
-                                        )
-                                        st.pyplot(merged_fig)
-                                        show_df = st.checkbox('Show df:', value=False, key="show-df1")
-                                        if show_df:
-                                            st.dataframe(merged_df, width='stretch', height=200)
-                                        
-                                        # Download merged data
-                                        csv_merged = merged_df.to_csv(index=False)
-                                        st.download_button(
-                                            label=":material/download: Download Merged Dataset",
-                                            data=csv_merged,
-                                            file_name="merged_training_data.csv",
-                                            mime="text/csv"
-                                        )
-                                    else:
-                                        st.info("⬆️ Upload training files in the sidebar to view merged training data")
+                                    st.info("Enable 'Show Model Training' in sidebar and upload training files to view merged training data.")
                                     
                 if show_dataframe:
                     # 🅾️ Rename colums to original names before export
