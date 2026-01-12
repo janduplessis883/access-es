@@ -152,7 +152,7 @@ with st.sidebar:
     
     # Model Training Toggle
     show_model_training = st.toggle(
-        ":material/school: Show Model Training",
+        ":material/school: Enable Model Training",
         value=False,
         help="Display the Model Training expander section for NBEats neural network training."
     )
@@ -960,7 +960,10 @@ if uploaded_files:
                                 )
                             else:
                                 st.error(f"❌ {metadata['message']}")
+                
                 st.space(size='small')
+                
+                # Debug Information & Export CSV - Always available regardless of model training toggle
                 if show_dataframe:
                     with st.expander("Debug Information & Export CSV", icon=":material/bug_report:", expanded=expander_open_debug):
                         if len(filtered_df) == 0:
@@ -1086,11 +1089,81 @@ if uploaded_files:
                                     
 
                                     st.markdown("#### :material/database: Historic Appointment Data")
-                                    st.info("Enable 'Show Model Training' in sidebar and upload training files to view this data.")
+                                    if show_model_training and 'training_metadata' in st.session_state and st.session_state.get('training_metadata', {}).get('appointments_series') is not None:
+                                        # Get the historic data from metadata
+                                        training_metadata = st.session_state['training_metadata']
+                                        appointments_series = training_metadata.get('appointments_series')
+                                        
+                                        # Convert to DataFrame for display
+                                        hist_df = pd.DataFrame({
+                                            'week': appointments_series.time_index,
+                                            'appointments': appointments_series.values().flatten()
+                                        })
+                                        
+                                        # Create plot
+                                        import matplotlib.pyplot as plt
+                                        fig_hist, ax = plt.subplots(figsize=(16, 3))
+                                        ax.plot(hist_df['week'], hist_df['appointments'], color='#a33b54', linewidth=2)
+                                        ax.set_title('Historic Training Data: Weekly Appointments', fontsize=14, fontweight='bold')
+                                        ax.set_xlabel('Week', fontsize=12)
+                                        ax.set_ylabel('Appointments', fontsize=12)
+                                        ax.grid(True, alpha=0.3, linewidth=0.3)
+                                        plt.tight_layout()
+                                        
+                                        st.pyplot(fig_hist)
+                                        
+                                        show_df_hist = st.checkbox('Show historic data df:', value=False, key="show-df-hist")
+                                        if show_df_hist:
+                                            st.dataframe(hist_df, width='stretch', height=150)
+                                    else:
+                                        st.info("Enable 'Show Model Training' in sidebar and upload training files to view this data.")
                                 
 
                                     st.markdown("#### :material/merge: Merged Training Data")
-                                    st.info("Enable 'Show Model Training' in sidebar and upload training files to view merged training data.")
+                                    if show_model_training and 'train_ts' in st.session_state and st.session_state['train_ts'] is not None:
+                                        # Get the merged TimeSeries
+                                        train_ts_display = st.session_state['train_ts']
+                                        
+                                        # Convert to DataFrame
+                                        merged_display_df = pd.DataFrame({
+                                            'week': train_ts_display.time_index,
+                                            'appointments': train_ts_display.univariate_component(0).values().flatten(),
+                                            'influenza': train_ts_display.univariate_component(1).values().flatten()
+                                        })
+                                        
+                                        # Create dual-axis plot
+                                        fig_merged, ax1 = plt.subplots(figsize=(18, 3))
+                                        
+                                        color1 = '#ab271f'
+                                        ax1.set_xlabel('Week', fontsize=12)
+                                        ax1.set_ylabel('Appointments', color=color1, fontsize=12)
+                                        ax1.plot(merged_display_df['week'], merged_display_df['appointments'], 
+                                                color=color1, linewidth=2, label='Appointments')
+                                        ax1.tick_params(axis='y', labelcolor=color1)
+                                        ax1.grid(True, alpha=0.3, linestyle='--')
+                                        
+                                        ax2 = ax1.twinx()
+                                        color2 = 'black'
+                                        ax2.set_ylabel('Influenza Level', color=color2, fontsize=12)
+                                        ax2.plot(merged_display_df['week'], merged_display_df['influenza'], 
+                                                color=color2, linewidth=2, linestyle='-', label='Influenza')
+                                        ax2.tick_params(axis='y', labelcolor=color2)
+                                        
+                                        plt.title(f'Merged Training Data: Appointments & Influenza\n{len(merged_display_df)} weeks',
+                                                 fontsize=14, fontweight='bold', pad=20)
+                                        
+                                        lines1, labels1 = ax1.get_legend_handles_labels()
+                                        lines2, labels2 = ax2.get_legend_handles_labels()
+                                        ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper left', fontsize=10)
+                                        
+                                        plt.tight_layout()
+                                        st.pyplot(fig_merged)
+                                        
+                                        show_df_merged = st.checkbox('Show merged data df:', value=False, key="show-df-merged")
+                                        if show_df_merged:
+                                            st.dataframe(merged_display_df, width='stretch', height=150)
+                                    else:
+                                        st.info("Enable 'Show Model Training' in sidebar and upload training files to view merged training data.")
                                     
                 if show_dataframe:
                     # 🅾️ Rename colums to original names before export
