@@ -26,6 +26,7 @@ st.logo("images/logo.png", size="small")
 
 # Sidebar Configuration
 with st.sidebar:
+    st.image("images/chilli.png")
     st.title(":material/settings: Settings")
     
     # File Upload
@@ -772,7 +773,7 @@ if uploaded_files:
                                     # Train Model Button
                                     st.divider()
                                     if st.button("Train NBEats Model", type="primary", use_container_width=False, key="train_nbeats_button"):
-                                        with st.spinner("Training NBEats Model... This may take several minutes..."):
+                                        with st.spinner("Training NBEats Model... This may take several minutes...", show_time=True):
                                             trained_result = train_nbeats_model_with_covariates(
                                                 train_ts,
                                                 input_chunk_length=52,

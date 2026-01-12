@@ -42,11 +42,11 @@ WEEKS_PER_MONTH = 4.345
 
 # Plot Configuration
 PLOT_COLORS = {
-    'actual_appointments': '#0077b6',
-    'arrs_historical': '#f48c06',
-    'arrs_future': '#cb3f4e',
-    'forecasted_apps': '#00b4d8',
-    'catchup_needed': '#6a994e',
+    'actual_appointments': '#546673',
+    'arrs_historical': '#c4bf7f',
+    'arrs_future': '#a03025',
+    'forecasted_apps': '#2C7A94',
+    'catchup_needed': '#e4af6c',
     'threshold_line': '#c1121f',
     'average_line': '#e4af6c',
     'arrs_cutoff_line': '#749857'

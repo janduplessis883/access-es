@@ -497,7 +497,7 @@ def create_clinician_stats_histograms(stats_df):
         data=stats_df,
         x='Avg App Duration (mins)',
         ax=axes[2],
-        color='#2ca02c',
+        color='#79803b',
         kde=True,
         bins=15
     )
@@ -513,7 +513,7 @@ def create_clinician_stats_histograms(stats_df):
         data=stats_df,
         x='Avg Book to App (mins)',
         ax=axes[3],
-        color='#ff7f0e',
+        color='#dd8259',
         kde=True,
         bins=15
     )

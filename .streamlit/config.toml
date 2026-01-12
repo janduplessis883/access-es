@@ -2,25 +2,25 @@
 font="Inter:https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap"
 
 base="light"
-primaryColor="#749857"
+primaryColor="#a03025"
 backgroundColor="#ffffff"
-secondaryBackgroundColor="#f9f8f7"
+secondaryBackgroundColor="#ededed"
 textColor="#374151"
 baseRadius="medium"
 
 redColor = "#ae4f4d"
 orangeColor = "#fb8500"
 yellowColor = "#e4af6c"
-greenColor = "#749857"
-blueColor = "#1e88e5"
+greenColor = "#a2a460"
+blueColor = "#427891"
 violetColor = "#db2777"
 grayColor = "#a3a3a3"
 
 codeBackgroundColor="#e8f2f5"
 
 [theme.sidebar]
-primaryColor="#749857"
-backgroundColor="#aec867"
-secondaryBackgroundColor="#cfd99b"
-textColor="#374151"
+primaryColor="#79803b"
+backgroundColor="#4D5F6C"
+secondaryBackgroundColor="#7A8691"
+textColor="#D2D6DA"
 baseRadius="medium"

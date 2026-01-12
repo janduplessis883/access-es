@@ -151,7 +151,7 @@ def process_historic_app_data(training_files, date_column='Appointment date', ap
                     fontsize=14, fontweight='bold')
         ax.set_xlabel('Week', fontsize=12)
         ax.set_ylabel('Number of Appointments', fontsize=12)
-        ax.grid(True, alpha=0.3, linestyle='--')
+        ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.3)
         ax.legend(fontsize=10)
         
         # Format y-axis with commas
