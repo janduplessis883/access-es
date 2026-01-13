@@ -16,7 +16,7 @@ FY_END = pd.Timestamp(2026, 3, 31)
 
 # Payment Thresholds
 THRESHOLD_100_PERCENT = 85.0  # Apps per 1000 per week for 100% payment
-THRESHOLD_75_PERCENT = 75.0   # Apps per 1000 per week for 75% payment
+THRESHOLD_75_PERCENT = 75.0  # Apps per 1000 per week for 75% payment
 
 # ARRS Month Mapping (end of month dates)
 ARRS_MONTH_MAP = {
@@ -31,7 +31,7 @@ ARRS_MONTH_MAP = {
     "December 25": pd.Timestamp(2025, 12, 31),
     "January 26": pd.Timestamp(2026, 1, 31),
     "February 26": pd.Timestamp(2026, 2, 28),
-    "March 26": pd.Timestamp(2026, 3, 31)
+    "March 26": pd.Timestamp(2026, 3, 31),
 }
 
 # Time Constants
@@ -42,14 +42,14 @@ WEEKS_PER_MONTH = 4.345
 
 # Plot Configuration
 PLOT_COLORS = {
-    'actual_appointments': '#546673',
-    'arrs_historical': '#c4bf7f',
-    'arrs_future': '#a03025',
-    'forecasted_apps': '#2C7A94',
-    'catchup_needed': '#e4af6c',
-    'threshold_line': '#c1121f',
-    'average_line': '#e4af6c',
-    'arrs_cutoff_line': '#749857'
+    "actual_appointments": "#546673",
+    "arrs_historical": "#c4bf7f",
+    "arrs_future": "#719ab4",
+    "forecasted_apps": "#2C7A94",
+    "catchup_needed": "#e4af6c",
+    "threshold_line": "#c1121f",
+    "average_line": "#e4af6c",
+    "arrs_cutoff_line": "#749857",
 }
 
 # Plot Heights
@@ -61,12 +61,18 @@ MONTHLY_PLOT_HEIGHT = 400
 PROJECTION_PLOT_HEIGHT = 400
 
 # Required Columns
-REQUIRED_COLUMNS = ['appointment_date', 'clinician', 'appointment_status', 'rota_type', 'patient_id']
+REQUIRED_COLUMNS = [
+    "appointment_date",
+    "clinician",
+    "appointment_status",
+    "rota_type",
+    "patient_id",
+]
 
 # Column Name Mappings
 COLUMN_RENAMES = {
-    'appointment_duration_(actual)': 'duration',
-    'time_between_booking_and_appointment': 'book_to_app'
+    "appointment_duration_(actual)": "duration",
+    "time_between_booking_and_appointment": "book_to_app",
 }
 
 # Default Values
