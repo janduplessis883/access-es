@@ -1,0 +1,2 @@
+Do not use emojis in my projects, instead use Google material icons in the fornat
+:material/<icon_name>: which is compatable with streamlit version 1.52

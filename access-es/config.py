@@ -46,7 +46,7 @@ PLOT_COLORS = {
     "arrs_historical": "#c4bf7f",
     "arrs_future": "#719ab4",
     "forecasted_apps": "#2C7A94",
-    "catchup_needed": "#e4af6c",
+    "catchup_needed": "#ae4f4d",
     "threshold_line": "#c1121f",
     "average_line": "#e4af6c",
     "arrs_cutoff_line": "#749857",
