@@ -11,9 +11,7 @@ from nbeats_forecasting import (
     plot_validation_and_forecast,
     process_influenza_data,
     process_historic_app_data,
-    plot_merged_training_data,
 )
-from forecast_appointments import forecast_surgery_appointments
 from train_model import (
     prepare_training_data,
     train_nbeats_model,
@@ -623,35 +621,7 @@ if uploaded_files:
                                     )
                                     forecast_df = None
                         else:
-                            # Fall back to quick forecast with current data only
-                            with st.spinner(
-                                "Generating forecast (train model in sidebar for better results)..."
-                            ):
-                                try:
-                                    forecast_df = forecast_surgery_appointments(
-                                        weekly_agg,
-                                        influenza_csv_path="data/influenza.csv",
-                                        forecast_weeks=int(
-                                            target_metrics["weeks_remaining"]
-                                        ),
-                                    )
-
-                                    if forecast_df is not None:
-                                        st.info(
-                                            f"ℹ️ Quick forecast generated. **Train the model in sidebar** "
-                                            f"for improved accuracy with 3+ years of historical data."
-                                        )
-                                    else:
-                                        st.info(
-                                            ":material/info: NBEats forecasting not available. "
-                                            "Using baseline historical average for projection."
-                                        )
-                                except Exception as e:
-                                    st.warning(
-                                        f":material/warning: Forecasting error: {str(e)}. "
-                                        f"Using baseline projection instead."
-                                    )
-                                    forecast_df = None
+                            forecast_df = None
 
                         # Create projection dataframe with or without ML forecast
                         proj_df = create_projection_dataframe(
@@ -938,7 +908,7 @@ if uploaded_files:
                             "Upload training dataset",
                             type="csv",
                             accept_multiple_files=True,
-                            help="Prepare a dataset from **1 Jan 2022 - 30 April 2025** from the same search you used to create your initial dataset. After your run your search break down only to **Appointment date, Appointment Status, Patient ID**.",
+                            help="Prepare a dataset from **1 Jan 2021 - 30 April 2025** from the same search you used to create your initial dataset. After your run your search break down only to **Appointment date, Appointment Status, Patient ID**.",
                             key="training_upload",
                         )
 
@@ -962,6 +932,8 @@ if uploaded_files:
                             first_file.seek(0)  # Reset file pointer
                             sample_df = pd.read_csv(first_file)
 
+                            # Normalize column names to lowercase with underscores
+                            sample_df.columns = sample_df.columns.str.lower().str.replace(" ", "_").str.strip()
                             available_columns = list(sample_df.columns)
                             first_file.seek(0)  # Reset again for actual use
                             st.success(
@@ -1009,6 +981,7 @@ if uploaded_files:
                             type="primary",
                             use_container_width=True,
                             icon=":material/rocket_launch:",
+                            help="When making adjustments to the Date Slider to set the date prediction should start on, remember to click this button again to apply you changed date."
                         ):
                             st.session_state["load_training_data"] = True
                             # Clear any previously loaded data
@@ -1045,6 +1018,9 @@ if uploaded_files:
                                     file.seek(0)  # Reset file pointer to beginning
                                     df = pd.read_csv(file)
 
+                                    # Normalize column names to lowercase with underscores
+                                    df.columns = df.columns.str.lower().str.replace(" ", "_").str.strip()
+
                                     training_dfs.append(df)
 
                                 if training_dfs:
@@ -1060,8 +1036,9 @@ if uploaded_files:
                                         "Preparing training dataset...", show_time=True
                                     ):
                                         # Step 1: Process historic appointments
+                                        # Pass the slider's end date so training data ends at the selected date
                                         historic_df, _ = process_historic_app_data(
-                                            training_files,
+                                            combined_training,
                                             filtered_df,
                                             date_column=date_column_name,
                                             app_column=appointments_column_name,
@@ -1071,12 +1048,10 @@ if uploaded_files:
                                         flu_df, _ = process_influenza_data()
 
                                         # Step 3: Merge and create multivariate TimeSeries
-                                        train_ts, metadata = (
-                                            merge_and_prepare_training_data(
-                                                historic_df, flu_df
-                                            )
+                                        train_ts, metadata = merge_and_prepare_training_data(
+                                            historic_df, flu_df
                                         )
-
+                                        
                                     if metadata["success"]:
                                         # Store in session state
                                         st.session_state["train_ts"] = train_ts
@@ -1217,43 +1192,60 @@ if uploaded_files:
                                     "Train NBEats Model",
                                     type="primary",
                                     use_container_width=True,
+                                    icon=":material/neurology:",
                                     key="train_nbeats_button",
                                 ):
-                                    with st.spinner(
-                                        "Training NBEats Model... This may take several minutes...",
-                                        show_time=True,
-                                    ):
-                                        trained_result = (
-                                            train_nbeats_model_with_covariates(
-                                                train_ts,
-                                                input_chunk_length=input_chunk_length,
-                                                output_chunk_length=output_chunk_length,
-                                                n_epochs=n_epochs,
-                                                num_stacks=num_stacks,
-                                                num_blocks=num_blocks,
-                                                num_layers=num_layers,
-                                                layer_widths=layer_widths,
-                                                batch_size=batch_size,
-                                                learning_rate=learning_rate,
-                                                validation_split=validation_split,
-                                            )
+                                    # Spinner with status messages
+                                    with st.spinner("Training NBEATS Model..."):
+                                        status_messages = []
+
+                                        def status_callback(msg):
+                                            status_messages.append(msg)
+
+                                        trained_result = train_nbeats_model_with_covariates(
+                                            train_ts,
+                                            input_chunk_length=input_chunk_length,
+                                            output_chunk_length=output_chunk_length,
+                                            n_epochs=n_epochs,
+                                            num_stacks=num_stacks,
+                                            num_blocks=num_blocks,
+                                            num_layers=num_layers,
+                                            layer_widths=layer_widths,
+                                            batch_size=batch_size,
+                                            learning_rate=learning_rate,
+                                            validation_split=validation_split,
+                                            status_callback=status_callback,
                                         )
 
-                                        if trained_result["success"]:
-                                            st.session_state["nbeats_trained_model"] = (
-                                                trained_result
-                                            )
-                                            st.session_state["nbeats_model_trained"] = (
-                                                True
-                                            )
-                                            st.success(
-                                                f"✅ NBEats Model Trained! {trained_result['training_weeks']} weeks used."
-                                            )
-                                            st.rerun()
-                                        else:
-                                            st.error(
-                                                f"❌ Training failed: {trained_result['message']}"
-                                            )
+                                    # Show status after training completes
+                                    if trained_result["success"]:
+                                        st.status(
+                                            "Training Complete!",
+                                            state="complete",
+                                            expanded=False
+                                        )
+                                        with st.expander("Training Details", expanded=False):
+                                            for msg in status_messages:
+                                                st.write(f"• {msg}")
+
+                                        st.session_state["nbeats_trained_model"] = (
+                                            trained_result
+                                        )
+                                        st.session_state["nbeats_model_trained"] = (
+                                            True
+                                        )
+                                        st.success(
+                                            f"NBEats Model Trained! {trained_result['training_weeks']} weeks used."
+                                        )
+                                        st.rerun()
+                                    else:
+                                        st.status(
+                                            "Training Failed",
+                                            state="error",
+                                            expanded=True
+                                        )
+                                        with st.expander("Error Details"):
+                                            st.error(trained_result["message"])
 
                                 # Show if model already trained
                                 if st.session_state.get("nbeats_model_trained", False):
@@ -1679,6 +1671,7 @@ if uploaded_files:
                                     ):
                                         # Get the merged TimeSeries
                                         train_ts_display = st.session_state["train_ts"]
+                                        training_metadata = st.session_state.get("training_metadata", {})
 
                                         # Convert to DataFrame
                                         merged_display_df = pd.DataFrame(
@@ -1696,6 +1689,25 @@ if uploaded_files:
                                                 .flatten(),
                                             }
                                         )
+                                        
+                                        # Display Training Dataset Date Range
+                                        if training_metadata:
+                                            col1, col2, col3 = st.columns(3)
+                                            with col1:
+                                                st.metric(
+                                                    "Training Start Date",
+                                                    pd.Timestamp(training_metadata['start_date']).strftime("%d %b %Y")
+                                                )
+                                            with col2:
+                                                st.metric(
+                                                    "Training End Date",
+                                                    pd.Timestamp(training_metadata['end_date']).strftime("%d %b %Y")
+                                                )
+                                            with col3:
+                                                st.metric(
+                                                    "Total Weeks",
+                                                    training_metadata['total_weeks']
+                                                )
 
                                         # Create dual-axis plot
                                         fig_merged, ax1 = plt.subplots(figsize=(16, 3))

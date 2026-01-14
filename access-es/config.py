@@ -44,7 +44,7 @@ WEEKS_PER_MONTH = 4.345
 PLOT_COLORS = {
     "actual_appointments": "#546673",
     "arrs_historical": "#c4bf7f",
-    "arrs_future": "#719ab4",
+    "arrs_future": "#e0718c",
     "forecasted_apps": "#2C7A94",
     "catchup_needed": "#ae4f4d",
     "threshold_line": "#c1121f",

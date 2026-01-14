@@ -13,6 +13,8 @@ import streamlit as st
 from notionhelper import NotionHelper
 import seaborn as sns 
 import matplotlib.pyplot as plt
+from matplotlib.ticker import FuncFormatter
+
 
 
 
@@ -33,9 +35,10 @@ def process_influenza_data():
     nh = NotionHelper(notion_token)
     inf = nh.get_data_source_pages_as_dataframe(database_id)
     inf['date'] = pd.to_datetime(inf['date'], format='%Y-%m-%d')
+
     inf = inf.sort_values(by='date').reset_index(drop=True)
     inf.drop(columns=['Name', 'notion_page_id'], inplace=True)
-    
+
     # Create figure and axes - sns.lineplot returns Axes, not Figure
     fig, ax = plt.subplots(figsize=(16, 2))
     sns.lineplot(data=inf, x='date', y='influenza', ax=ax, color='#515e6b')
@@ -48,20 +51,22 @@ def process_influenza_data():
     return inf, fig
 
 
-def process_historic_app_data(training_files, filtered_df, date_column='appointment_date', app_column='appointment_status'):
+def process_historic_app_data(combined_df, filtered_df, date_column='appointment_date', app_column='appointment_status'):
     """
     Process uploaded historic training data files and create visualization.
     
     This function:
-    1. Combines multiple uploaded CSV files
-    2. Filters for 'Finished' appointments only
+    1. Filters historic data for 'Finished' appointments before April 2025
+    2. Concatenates with current year filtered data (from slider)
     3. Aggregates to weekly frequency for full time period
     4. Creates visualization of appointments over time
     
     Parameters:
     -----------
-    training_files : list
-        List of uploaded file objects from st.file_uploader
+    combined_df : pd.DataFrame
+        Historic training data (before April 2025)
+    filtered_df : pd.DataFrame
+        Current year's filtered appointment data (already filtered by slider to END DATE)
     date_column : str
         Name of date column in training data
     app_column : str
@@ -76,55 +81,96 @@ def process_historic_app_data(training_files, filtered_df, date_column='appointm
     """
     
     try:
-        # 1. Load and combine all training files
-        training_dfs = []
-        for idx, file in enumerate(training_files):
-            file.seek(0)  # Reset file pointer
-            df = pd.read_csv(file)
-            print(f"Loaded file {idx+1} ({file.name}): {len(df)} rows")
-            training_dfs.append(df)
-        
-        if not training_dfs:
-            raise ValueError("No training files provided")
-        
-        # Combine all files
-        combined_df = pd.concat(training_dfs, ignore_index=True)
-        print(f"Combined {len(training_dfs)} files: {len(combined_df)} total rows")
-        
-        # 2. Filter for 'Finished' appointments only
+        # Standardize column names for combined_df
+        combined_df.columns = combined_df.columns.str.lower().str.replace(" ", "_").str.strip()
+
+        # Also normalize the app_column and date_column parameters
+        app_column = app_column.lower().replace(" ", "_").strip()
+        date_column = date_column.lower().replace(" ", "_").strip()
+
+        # Check if app_column exists
         if app_column not in combined_df.columns:
             raise ValueError(f"Column '{app_column}' not found. Available columns: {list(combined_df.columns)}")
         
+        # Filter for 'Finished' appointments only
         finished_df = combined_df[combined_df[app_column] == 'Finished'].copy()
         print(f"Filtered to {len(finished_df)} 'Finished' appointments ({len(finished_df)/len(combined_df)*100:.1f}% of total)")
         
-        # 3. Convert date column to datetime
+        # Check if date_column exists
         if date_column not in finished_df.columns:
             raise ValueError(f"Column '{date_column}' not found. Available columns: {list(finished_df.columns)}")
         
+        # Convert date columns to datetime
         finished_df[date_column] = pd.to_datetime(finished_df[date_column])
-        finished_df  = finished_df[finished_df['appointment_date'] < pd.Timestamp('2025-04-01')]
-        finished_df = pd.concat([finished_df, filtered_df], axis=0, ignore_index=True)
-        finished_df.sort_values(by='appointment_date', inplace=True)
-        # 4. Set date as index for resampling
-        finished_df = finished_df.set_index(date_column)
+        finished_df = finished_df.sort_values(by=date_column).reset_index(drop=True)
+
+        # Define cutoff: historic data is before April 1, 2025
+        current_start = pd.Timestamp('2025-04-01')
         
-        # 5. Aggregate to weekly frequency (full time period)
-        weekly_df = finished_df.resample('W').size().reset_index()
+        # Filter historic data to before April 2025
+        filtered_historic_df = finished_df[finished_df[date_column] < current_start].copy()
+        print(f"Historic data (before {current_start.date()}): {len(filtered_historic_df)} appointments")
+        
+        # Filter current data from April 2025 onwards (already filtered by slider in app.py)
+        # Ensure filtered_df has datetime column
+        if date_column in filtered_df.columns:
+            filtered_df_copy = filtered_df.copy()
+            filtered_df_copy[date_column] = pd.to_datetime(filtered_df_copy[date_column])
+            current_train_df = filtered_df_copy[filtered_df_copy[date_column] >= current_start].copy()
+        else:
+            # If filtered_df doesn't have the column, it might be using 'appointment_date'
+            filtered_df_copy = filtered_df.copy()
+            if 'appointment_date' in filtered_df_copy.columns:
+                filtered_df_copy['appointment_date'] = pd.to_datetime(filtered_df_copy['appointment_date'])
+                current_train_df = filtered_df_copy[filtered_df_copy['appointment_date'] >= current_start].copy()
+                # Rename to match date_column
+                current_train_df = current_train_df.rename(columns={'appointment_date': date_column})
+            else:
+                current_train_df = pd.DataFrame(columns=[date_column])
+        
+        print(f"Current data (from {current_start.date()} to slider end): {len(current_train_df)} appointments")
+        
+        # Concatenate historic and current data
+        train_apps_df = pd.concat([filtered_historic_df, current_train_df], axis=0, ignore_index=True)
+        train_apps_df = train_apps_df.sort_values(by=date_column).reset_index(drop=True)
+        
+        print(f"Combined training data: {len(train_apps_df)} appointments")
+        print(f"Date range: {train_apps_df[date_column].min()} to {train_apps_df[date_column].max()}")
+
+        # Get the training end date from filtered_df (current appointment data from slider)
+        # This ensures training data ends at the same date as the current data
+        filtered_df_copy = filtered_df.copy()
+        if 'appointment_date' in filtered_df_copy.columns:
+            filtered_df_copy['appointment_date'] = pd.to_datetime(filtered_df_copy['appointment_date'])
+            training_end_date = filtered_df_copy['appointment_date'].max()
+        else:
+            # Fallback to combined data max date
+            training_end_date = train_apps_df[date_column].max()
+
+        print(f"Training end date (from slider): {training_end_date}")
+        
+        # Aggregate to weekly frequency (week ending Sunday)
+        # Set date as index for resampling
+        train_apps_df = train_apps_df.set_index(date_column)
+        weekly_df = train_apps_df.resample('W-SUN').size().reset_index()
         weekly_df.columns = ['week', 'appointments']
-        print(f"Aggregated to {len(weekly_df)} weeks")
-        print(f"Date range: {weekly_df['week'].min()} to {weekly_df['week'].max()}")
         
-        # 6. Fill missing weeks with zeros
+        print(f"Aggregated to {len(weekly_df)} weeks")
+        print(f"Weekly date range: {weekly_df['week'].min()} to {weekly_df['week'].max()}")
+        
+        # Fill missing weeks with zeros
         min_week = weekly_df['week'].min()
         max_week = weekly_df['week'].max()
-        complete_weeks = pd.date_range(start=min_week, end=max_week, freq='W')
+        complete_weeks = pd.date_range(start=min_week, end=max_week, freq='W-SUN')
         complete_df = pd.DataFrame({'week': complete_weeks})
+        
+        # Merge to fill gaps
         weekly_df = complete_df.merge(weekly_df, on='week', how='left').fillna(0)
+        weekly_df['appointments'] = weekly_df['appointments'].astype(int)
+        
         print(f"Filled to {len(weekly_df)} complete weeks (gaps filled with 0)")
         
-        # 7. Add summary statistics
-        weekly_df['appointments'] = weekly_df['appointments'].astype(int)
+        # Calculate statistics
         mean_apps = weekly_df['appointments'].mean()
         median_apps = weekly_df['appointments'].median()
         total_apps = weekly_df['appointments'].sum()
@@ -136,20 +182,18 @@ def process_historic_app_data(training_files, filtered_df, date_column='appointm
         print(f"  Min per week: {weekly_df['appointments'].min()}")
         print(f"  Max per week: {weekly_df['appointments'].max()}")
         
-        # 8. Create visualization
+        # Create visualization
         fig, ax = plt.subplots(figsize=(16, 3))
         
-        # Main line plot
-        sns.barplot(data=weekly_df, x='week', y='appointments', ax=ax, linewidth=2, color='#a33b54')
+        # Line plot
+        ax.plot(weekly_df['week'], weekly_df['appointments'], color='#a33b54', linewidth=2)
         
         # Add mean line
         ax.axhline(y=mean_apps, color='#ab271f', linestyle='--', linewidth=1.5, 
                    label=f'Mean: {mean_apps:.1f} apps/week', alpha=0.7)
         
         # Styling
-        ax.set_title(f'Historic Training Data: Weekly Appointments Over Time\n'
-                    f'{len(training_dfs)} files | {len(combined_df):,} total rows | '
-                    f'{len(finished_df):,} finished appointments | {len(weekly_df)} weeks',
+        ax.set_title(f'Historic Training Data: Weekly Appointments Over Time\n{len(train_apps_df):,} appointments | {len(weekly_df)} weeks',
                     fontsize=14, fontweight='bold')
         ax.set_xlabel('Week', fontsize=12)
         ax.set_ylabel('Number of Appointments', fontsize=12)
@@ -167,6 +211,8 @@ def process_historic_app_data(training_files, filtered_df, date_column='appointm
         
     except Exception as e:
         print(f"\n❌ Error processing historic training data: {str(e)}")
+        import traceback
+        traceback.print_exc()
         
         # Return empty dataframe and figure on error
         empty_df = pd.DataFrame(columns=['week', 'appointments'])
@@ -176,96 +222,6 @@ def process_historic_app_data(training_files, filtered_df, date_column='appointm
         ax.set_title('Error Processing Data', fontsize=14, fontweight='bold')
         
         return empty_df, fig
-
-def plot_merged_training_data(appointments_df, influenza_df):
-    """
-    Create visualization of merged appointments and influenza data.
-    
-    Parameters:
-    -----------
-    appointments_df : pd.DataFrame
-        Weekly appointments data with columns ['week', 'appointments']
-    influenza_df : pd.DataFrame
-        Influenza data with columns ['date', 'influenza']
-        
-    Returns:
-    --------
-    matplotlib.figure.Figure
-        Dual-axis plot showing appointments and influenza over time
-    pd.DataFrame
-        Merged dataframe with both appointments and influenza
-    """
-    try:
-        # Prepare appointments data
-        df_apps = appointments_df.copy()
-        df_apps['week'] = pd.to_datetime(df_apps['week'])
-        
-        # Prepare influenza data - aggregate to weekly
-        df_flu = influenza_df.copy()
-        df_flu['date'] = pd.to_datetime(df_flu['date'])
-        df_flu = df_flu.set_index('date')
-        df_flu_weekly = df_flu.resample('W')['influenza'].mean().reset_index()
-        df_flu_weekly.columns = ['week', 'influenza']
-        
-        # Fill missing weeks in influenza
-        min_week_flu = df_flu_weekly['week'].min()
-        max_week_flu = df_flu_weekly['week'].max()
-        complete_weeks_flu = pd.date_range(start=min_week_flu, end=max_week_flu, freq='W')
-        complete_df_flu = pd.DataFrame({'week': complete_weeks_flu})
-        df_flu_weekly = complete_df_flu.merge(df_flu_weekly, on='week', how='left')
-        df_flu_weekly['influenza'] = df_flu_weekly['influenza'].ffill().bfill()
-        
-        # Merge appointments and influenza on week
-        merged_df = df_apps.merge(df_flu_weekly, on='week', how='inner')
-        
-        # Create dual-axis plot
-        fig, ax1 = plt.subplots(figsize=(18, 2))
-        
-        # Plot appointments on primary axis
-        color1 = '#ab271f'
-        ax1.set_xlabel('Week', fontsize=12)
-        ax1.set_ylabel('Appointments', color=color1, fontsize=12)
-        ax1.plot(merged_df['week'], merged_df['appointments'], 
-                color=color1, linewidth=2, label='Appointments')
-        ax1.tick_params(axis='y', labelcolor=color1)
-        ax1.grid(True, alpha=0.3, linewidth=0.3)
-        
-        # Create secondary axis for influenza
-        ax2 = ax1.twinx()
-        color2 = 'black'
-        ax2.set_ylabel('Influenza Level', color=color2, fontsize=12)
-        ax2.plot(merged_df['week'], merged_df['influenza'], 
-                color=color2, linewidth=2, linestyle='-', label='Influenza')
-        ax2.tick_params(axis='y', labelcolor=color2)
-        
-        # Title and legend
-        plt.title(f'Merged Training Data: Appointments & Influenza Over Time\n'
-                 f'{len(merged_df)} weeks | {merged_df["week"].min().date()} to {merged_df["week"].max().date()}',
-                 fontsize=14, fontweight='bold', pad=20)
-        
-        # Combine legends from both axes
-        lines1, labels1 = ax1.get_legend_handles_labels()
-        lines2, labels2 = ax2.get_legend_handles_labels()
-        ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper left', fontsize=10)
-        
-        plt.tight_layout()
-        
-        print(f"\n✅ Created merged visualization: {len(merged_df)} weeks")
-        
-        return fig, merged_df
-        
-    except Exception as e:
-        print(f"\n❌ Error creating merged visualization: {str(e)}")
-        
-        # Return empty figure on error
-        fig, ax = plt.subplots(figsize=(12, 6))
-        ax.text(0.5, 0.5, f'Error: {str(e)}', 
-                ha='center', va='center', fontsize=14, color='red')
-        ax.set_title('Error Creating Merged Plot', fontsize=14, fontweight='bold')
-        
-        empty_df = pd.DataFrame(columns=['week', 'appointments', 'influenza'])
-        return fig, empty_df
-
 
 def merge_and_prepare_training_data(appointments_df, influenza_df):
     """
@@ -299,41 +255,87 @@ def merge_and_prepare_training_data(appointments_df, influenza_df):
         # 1. Prepare appointments data
         df_apps = appointments_df.copy()
         df_apps['week'] = pd.to_datetime(df_apps['week'])
-        print(f"\nAppointments Data:")
+
+        # Get training end date from appointments data (which comes from slider via process_historic_app_data)
+        training_set_end_date = df_apps['week'].max()
+
+        # Trim appointments to training end date (in case historic data extends beyond slider)
+        df_apps = df_apps[df_apps['week'] <= training_set_end_date].copy()
+
+        print(f"\nAppointments Data (trimmed to slider end date):")
         print(f"  Weeks: {len(df_apps)}")
         print(f"  Date range: {df_apps['week'].min()} to {df_apps['week'].max()}")
         
-        # 2. Prepare influenza data - aggregate to weekly
+        # 2. Prepare influenza data - resample from daily to weekly
         df_flu = influenza_df.copy()
         df_flu['date'] = pd.to_datetime(df_flu['date'])
         
-        # Resample influenza to weekly (week ending Sunday)
+        # Resample to weekly, taking the mean (week ending Sunday to match appointments)
         df_flu = df_flu.set_index('date')
-        df_flu_weekly = df_flu.resample('W')['influenza'].mean().reset_index()
+        df_flu_weekly = df_flu.resample('W-SUN')['influenza'].mean().reset_index()
         df_flu_weekly.columns = ['week', 'influenza']
         
-        # Fill missing weeks
-        min_week_flu = df_flu_weekly['week'].min()
-        max_week_flu = df_flu_weekly['week'].max()
-        complete_weeks_flu = pd.date_range(start=min_week_flu, end=max_week_flu, freq='W')
-        complete_df_flu = pd.DataFrame({'week': complete_weeks_flu})
-        df_flu_weekly = complete_df_flu.merge(df_flu_weekly, on='week', how='left')
-        df_flu_weekly['influenza'] = df_flu_weekly['influenza'].ffill().bfill()
+        # Trim influenza to training end date
+        df_flu_trimmed = df_flu_weekly[df_flu_weekly['week'] <= training_set_end_date].copy()
         
-        print(f"\nInfluenza Data:")
-        print(f"  Weeks: {len(df_flu_weekly)}")
-        print(f"  Date range: {df_flu_weekly['week'].min()} to {df_flu_weekly['week'].max()}")
+        # Forward fill and back fill any NaN values in influenza data
+        df_flu_trimmed['influenza'] = df_flu_trimmed['influenza'].ffill().bfill()
         
+        print(f"\nInfluenza Data (trimmed to training end):")
+        print(f"  Weeks: {len(df_flu_trimmed)}")
+        print(f"  Date range: {df_flu_trimmed['week'].min()} to {df_flu_trimmed['week'].max()}")
+        print(f"  First 5 weeks: {df_flu_trimmed['week'].head().tolist()}")
+        print(f"  Last 5 weeks: {df_flu_trimmed['week'].tail().tolist()}")
+
         # 3. Merge appointments and influenza on week
-        merged_df = df_apps.merge(df_flu_weekly, on='week', how='inner')
+        merged_df = df_apps.merge(df_flu_trimmed, on='week', how='inner')
+
         print(f"\n🔗 Merged Data:")
         print(f"  Total weeks: {len(merged_df)}")
-        print(f"  Date range: {merged_df['week'].min()} to {merged_df['week'].max()}")
+        if len(merged_df) > 0:
+            print(f"  Date range: {merged_df['week'].min()} to {merged_df['week'].max()}")
+        else:
+            print(f"  Appointments weeks: {df_apps['week'].tolist()}")
+            print(f"  Influenza weeks: {df_flu_trimmed['week'].tolist()}")
         
         if len(merged_df) == 0:
-            raise ValueError("No overlapping weeks between appointments and influenza data")
+            # Provide more diagnostic information
+            apps_min = df_apps['week'].min()
+            apps_max = df_apps['week'].max()
+            flu_min = df_flu_trimmed['week'].min()
+            flu_max = df_flu_trimmed['week'].max()
+            raise ValueError(
+                f"No overlapping weeks between appointments and influenza data.\n"
+                f"Appointments date range: {apps_min} to {apps_max}\n"
+                f"Influenza date range: {flu_min} to {flu_max}\n\n"
+                f"Possible causes:\n"
+                f"1. No influenza data in Notion for the appointment date range\n"
+                f"2. Influenza data needs to be updated in Notion\n"
+                f"3. Check that DATA_ID in secrets matches the influenza database"
+            )
         
-       # 4. Create Darts TimeSeries for appointments
+        # 4. Check for and handle any NaN values
+        initial_length = len(merged_df)
+        has_nan_mask = merged_df[['appointments', 'influenza']].isna().any(axis=1)
+        
+        if has_nan_mask.any():
+            # Find the first row without NaN
+            first_valid_idx = (~has_nan_mask).idxmax() if has_nan_mask.any() else 0
+            
+            # Drop all rows before the first valid row
+            merged_df = merged_df.loc[first_valid_idx:].reset_index(drop=True)
+            rows_dropped = initial_length - len(merged_df)
+            
+            if rows_dropped > 0:
+                print(f"\n🧹 Cleaned NaN rows from beginning:")
+                print(f"  Dropped {rows_dropped} rows with NaN values")
+                print(f"  New date range: {merged_df['week'].min()} to {merged_df['week'].max()}")
+                print(f"  New length: {len(merged_df)} weeks")
+        
+        if len(merged_df) == 0:
+            raise ValueError("No valid data remaining after NaN cleaning")
+        
+        # 5. Create Darts TimeSeries for appointments
         ts_appointments = TimeSeries.from_dataframe(
             merged_df[['week', 'appointments']], 
             time_col='week', 
@@ -341,7 +343,7 @@ def merge_and_prepare_training_data(appointments_df, influenza_df):
             freq='W'
         )
         
-        # 5. Create Darts TimeSeries for influenza
+        # 6. Create Darts TimeSeries for influenza
         ts_influenza = TimeSeries.from_dataframe(
             merged_df[['week', 'influenza']], 
             time_col='week', 
@@ -349,20 +351,21 @@ def merge_and_prepare_training_data(appointments_df, influenza_df):
             freq='W'
         )
         
-        # 6. Stack into multivariate series [appointments, influenza]
+        # 7. Stack into multivariate series [appointments, influenza]
         train_ts = ts_appointments.stack(ts_influenza)
         
-        # 7. Create metadata
+        # 8. Create metadata
         metadata = {
             'success': True,
             'total_weeks': len(train_ts),
             'start_date': train_ts.start_time(),
             'end_date': train_ts.end_time(),
-            'training_weeks': len(merged_df),  # Total merged weeks
-            'current_weeks': 0,  # Not applicable in this workflow
+            'training_weeks': len(merged_df),
+            'current_weeks': 0,
             'components': train_ts.components.tolist(),
             'message': f'Successfully merged {len(train_ts)} weeks of data',
-            'appointments_series': ts_appointments  # Store for plotting
+            'appointments_series': ts_appointments,
+            'trimmed_to_slider_date': True
         }
         
         print(f"\n✅ Training Dataset Created:")
@@ -375,12 +378,16 @@ def merge_and_prepare_training_data(appointments_df, influenza_df):
         
     except Exception as e:
         print(f"\n❌ Error merging training data: {str(e)}\n")
+        import traceback
+        traceback.print_exc()
+        
         metadata = {
             'success': False,
             'message': f'Error: {str(e)}',
             'total_weeks': 0
         }
         return None, metadata
+    
 
 
 def train_nbeats_model_with_covariates(
@@ -396,11 +403,12 @@ def train_nbeats_model_with_covariates(
     learning_rate=5e-4,
     validation_split=0.2,
     random_state=58,
-    accelerator="cpu"
+    accelerator="cpu",
+    status_callback=None
 ):
     """
     Train NBEats model on multivariate TimeSeries with covariates.
-    
+
     Parameters:
     -----------
     train_ts : TimeSeries
@@ -413,26 +421,29 @@ def train_nbeats_model_with_covariates(
         Maximum training epochs
     validation_split : float
         Fraction of data reserved for validation
-        
+    status_callback : callable, optional
+        Function to call with status updates (receives status message string)
+
     Returns:
     --------
     dict
         Training results with model, scalers, and metadata
     """
-    
+
+    def update_status(msg):
+        if status_callback:
+            status_callback(msg)
+        print(f"  📍 {msg}")
+
     try:
-        print("\n" + "="*60)
-        print("NBEATS MODEL TRAINING")
-        print("="*60)
-        
+        update_status("Starting NBEATS model training...")
+
         # 1. Split multivariate series into target and covariate
         target_series = train_ts.univariate_component(0)  # appointments
         covariate_series = train_ts.univariate_component(1)  # influenza
-        
-        print(f"\n📊 Data Split:")
-        print(f"  Target (appointments): {len(target_series)} weeks")
-        print(f"  Covariate (influenza): {len(covariate_series)} weeks")
-        
+
+        update_status(f"Prepared data: {len(target_series)} weeks of appointments with influenza covariate")
+
         # Check minimum data requirements
         min_required = input_chunk_length + output_chunk_length
         if len(target_series) < min_required:
@@ -441,29 +452,24 @@ def train_nbeats_model_with_covariates(
                 'message': f'Insufficient data. Need at least {min_required} weeks, got {len(target_series)}',
                 'model': None
             }
-        
+
         # 2. Calculate validation length
         val_length = max(output_chunk_length, int(len(target_series) * validation_split))
         train_length = len(target_series) - val_length
-        
-        print(f"\n📈 Data Allocation:")
-        print(f"  Training: {train_length} weeks")
-        print(f"  Validation: {val_length} weeks")
-        print(f"  Input chunk: {input_chunk_length} weeks")
-        print(f"  Output chunk: {output_chunk_length} weeks")
-        
+
+        update_status(f"Data allocated: {train_length} weeks training, {val_length} weeks validation")
+
         # 3. Apply transformations to target
-        print(f"\n🔄 Applying Min-Max Scaling...")
+        update_status("Applying Min-Max scaling to data...")
         target_scaler = Scaler(MinMaxScaler(feature_range=(0, 1)))
         target_scaled = target_scaler.fit_transform(target_series)
-        
+
         # 4. Apply transformations to covariates
         covariate_scaler = Scaler(MinMaxScaler(feature_range=(0, 1)))
         covariate_scaled = covariate_scaler.fit_transform(covariate_series)
-        
-        print(f"  ✓ Target scaled to range [0, 1]")
-        print(f"  ✓ Covariate scaled to range [0, 1]")
-        
+
+        update_status("Scaling complete")
+
         # 5. Configure Early Stopping
         early_stopper = EarlyStopping(
             monitor="train_loss",
@@ -471,17 +477,10 @@ def train_nbeats_model_with_covariates(
             min_delta=0.0001,
             mode='min',
         )
-        
+
         # 6. Initialize NBEats Model
-        print(f"\n🧠 Initializing NBEats Model:")
-        print(f"  Architecture: Generic")
-        print(f"  Stacks: {num_stacks}")
-        print(f"  Blocks per stack: {num_blocks}")
-        print(f"  Layers per block: {num_layers}")
-        print(f"  Layer width: {layer_widths}")
-        print(f"  Batch size: {batch_size}")
-        print(f"  Learning rate: {learning_rate}")
-        
+        update_status("Initializing NBEATS neural network architecture...")
+
         model = NBEATSModel(
             input_chunk_length=input_chunk_length,
             output_chunk_length=output_chunk_length,
@@ -498,27 +497,21 @@ def train_nbeats_model_with_covariates(
             pl_trainer_kwargs={
                 "accelerator": accelerator,
                 "callbacks": [early_stopper],
-                "enable_progress_bar": True,
-                "enable_model_summary": True
+                "enable_progress_bar": False,
+                "enable_model_summary": False
             }
         )
-        
+
         # 7. Train the model
-        print(f"\n🚀 Training Model (max {n_epochs} epochs)...")
-        print(f"   Early stopping enabled (patience=15)")
-        print("-" * 60)
-        
+        update_status(f"Training model (up to {n_epochs} epochs, early stopping enabled)...")
+
         model.fit(
             series=target_scaled,
             past_covariates=covariate_scaled,
-            verbose=True
+            verbose=False
         )
-        
-        print("-" * 60)
-        print(f"✅ Training Complete!")
-        
-        # 8. Calculate validation metrics
-        print(f"\n📊 Calculating Validation Metrics...")
+
+        update_status("Training complete! Calculating validation metrics...")
         
         # Limit validation prediction to output_chunk_length (we don't have future covariates beyond that)
         val_pred_length = min(val_length, output_chunk_length)
@@ -544,12 +537,9 @@ def train_nbeats_model_with_covariates(
         val_mape = mape(val_target_unscaled, val_pred_unscaled)
         val_rmse = rmse(val_target_unscaled, val_pred_unscaled)
         val_mae = mae(val_target_unscaled, val_pred_unscaled)
-        
-        print(f"  sMAPE: {val_smape:.2f}%")
-        print(f"  MAPE: {val_mape:.2f}%")
-        print(f"  RMSE: {val_rmse:.4f}")
-        print(f"  MAE: {val_mae:.4f}")
-        
+
+        update_status(f"Validation: sMAPE={val_smape:.2f}%, MAPE={val_mape:.2f}%, RMSE={val_rmse:.2f}")
+
         # 9. Create result dictionary
         result = {
             'success': True,
@@ -570,22 +560,18 @@ def train_nbeats_model_with_covariates(
                 'mae': float(val_mae)
             }
         }
-        
-        print(f"\n📦 Model Package Created:")
-        print(f"  ✓ Trained NBEats model")
-        print(f"  ✓ Target scaler")
-        print(f"  ✓ Covariate scaler")
-        print(f"  ✓ Scaled time series")
-        print(f"  ✓ Validation metrics")
-        print("="*60 + "\n")
-        
+
+        update_status("Model training complete and packaged!")
         return result
-        
+
     except Exception as e:
-        print(f"\n❌ Training Error: {str(e)}\n")
+        error_msg = f"Training error: {str(e)}"
+        if status_callback:
+            status_callback(f"Error: {error_msg}")
+        print(f"\n❌ {error_msg}\n")
         return {
             'success': False,
-            'message': f'Training error: {str(e)}',
+            'message': error_msg,
             'model': None
         }
 
