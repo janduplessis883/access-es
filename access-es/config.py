@@ -76,6 +76,6 @@ COLUMN_RENAMES = {
 }
 
 # Default Values
-DEFAULT_LIST_SIZE = 1
-DEFAULT_ARRS = 0
+DEFAULT_LIST_SIZE = 13958
+DEFAULT_ARRS = 9320
 SAFE_WEEKS_MIN = 0.1  # Minimum value to prevent division by zero

@@ -37,8 +37,8 @@ def process_influenza_data():
     inf.drop(columns=['Name', 'notion_page_id'], inplace=True)
     
     # Create figure and axes - sns.lineplot returns Axes, not Figure
-    fig, ax = plt.subplots(figsize=(16, 3))
-    sns.lineplot(data=inf, x='date', y='influenza', ax=ax, color='black')
+    fig, ax = plt.subplots(figsize=(16, 2))
+    sns.lineplot(data=inf, x='date', y='influenza', ax=ax, color='#515e6b')
     ax.set_title('Influenza Data Over Time', fontsize=14, fontweight='bold')
     ax.set_xlabel('Date', fontsize=12)
     ax.set_ylabel('Influenza Level', fontsize=12)
@@ -219,7 +219,7 @@ def plot_merged_training_data(appointments_df, influenza_df):
         merged_df = df_apps.merge(df_flu_weekly, on='week', how='inner')
         
         # Create dual-axis plot
-        fig, ax1 = plt.subplots(figsize=(18, 3))
+        fig, ax1 = plt.subplots(figsize=(18, 2))
         
         # Plot appointments on primary axis
         color1 = '#ab271f'
@@ -228,7 +228,7 @@ def plot_merged_training_data(appointments_df, influenza_df):
         ax1.plot(merged_df['week'], merged_df['appointments'], 
                 color=color1, linewidth=2, label='Appointments')
         ax1.tick_params(axis='y', labelcolor=color1)
-        ax1.grid(True, alpha=0.3, linestyle='--')
+        ax1.grid(True, alpha=0.3, linewidth=0.3)
         
         # Create secondary axis for influenza
         ax2 = ax1.twinx()

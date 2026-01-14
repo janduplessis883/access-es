@@ -228,8 +228,8 @@ def create_weekly_trend_plot(
         xaxis_title="Week Starting Date",
         yaxis_title="Total Appointments",
         hovermode="x unified",
-        xaxis=dict(showgrid=True, gridwidth=0.5, gridcolor="lightgray"),
-        yaxis=dict(showgrid=True, gridwidth=0.5, gridcolor="lightgray"),
+        xaxis=dict(showgrid=True, gridwidth=0.3, gridcolor="lightgray"),
+        yaxis=dict(showgrid=True, gridwidth=0.3, gridcolor="lightgray"),
     )
 
     return fig
@@ -311,8 +311,8 @@ def create_monthly_trend_plot(monthly_agg, arrs_end_date, should_apply_arrs):
         xaxis_title="Month",
         yaxis_title="Total Appointments",
         hovermode="x unified",
-        xaxis=dict(showgrid=True, gridwidth=0.5, gridcolor="lightgray"),
-        yaxis=dict(showgrid=True, gridwidth=0.5, gridcolor="lightgray"),
+        xaxis=dict(showgrid=True, gridwidth=0.3, gridcolor="lightgray"),
+        yaxis=dict(showgrid=True, gridwidth=0.3, gridcolor="lightgray"),
     )
 
     return fig
@@ -339,8 +339,8 @@ def create_duration_boxplot(df, selected_clinicians):
         yaxis_title="Clinician",
         xaxis_title="Duration (minutes)",
         showlegend=False,
-        xaxis=dict(showgrid=True, gridwidth=0.5, gridcolor="lightgray", range=[0, 150]),
-        yaxis=dict(showgrid=True, gridwidth=0.5, gridcolor="lightgray"),
+        xaxis=dict(showgrid=True, gridwidth=0.3, gridcolor="lightgray", range=[0, 150]),
+        yaxis=dict(showgrid=True, gridwidth=0.3, gridcolor="lightgray"),
     )
 
     return fig
@@ -409,8 +409,8 @@ def create_projection_chart(combined_proj_df, list_size):
         xaxis_title="Week",
         yaxis_title="Appointments",
         hovermode="x unified",
-        xaxis=dict(showgrid=True, gridwidth=0.5, gridcolor="lightgray"),
-        yaxis=dict(showgrid=True, gridwidth=0.5, gridcolor="lightgray"),
+        xaxis=dict(showgrid=True, gridwidth=0.3, gridcolor="lightgray"),
+        yaxis=dict(showgrid=True, gridwidth=0.3, gridcolor="lightgray"),
     )
 
     return fig

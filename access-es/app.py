@@ -667,7 +667,7 @@ if uploaded_files:
 
                         # Show forecast details if available
                         if forecast_df is not None:
-                            with st.expander("View Forecast Details", expanded=False):
+                            with st.expander("View Forecast Details", expanded=False, icon=":material/expand_circle_down:"):
                                 # Calculate metrics for the forecast period
                                 total_forecast_apps = forecast_df[
                                     "forecasted_appointments"
@@ -1322,8 +1322,10 @@ if uploaded_files:
                                     col1, col2 = st.columns([1, 1])
                                     with col1:
                                         if st.button(
-                                            ":material/online_prediction: Generate Test Forecast (12 weeks)",
+                                            "Generate Test Forecast (12 weeks)",
                                             use_container_width=True,
+                                            type='primary',
+                                            icon=":material/add:"
                                         ):
                                             with st.spinner("Generating forecast..."):
                                                 test_forecast_df = (
@@ -1347,8 +1349,9 @@ if uploaded_files:
                                                     )
                                     with col2:
                                         if st.button(
-                                            "🗑️ Clear Forecast from Chart",
+                                            "Clear Forecast from Chart",
                                             use_container_width=True,
+                                            icon=":material/delete:"
                                         ):
                                             if (
                                                 "trajectory_forecast"
@@ -1395,7 +1398,7 @@ if uploaded_files:
                                 # Download button for full dataset
                                 csv_data = train_df.to_csv(index=False)
                                 st.download_button(
-                                    label="📥 Download Full Training Dataset",
+                                    label="Download Full Training Dataset",
                                     data=csv_data,
                                     file_name="training_dataset.csv",
                                     mime="text/csv",
@@ -1633,7 +1636,7 @@ if uploaded_files:
                                         # Create plot
                                         import matplotlib.pyplot as plt
 
-                                        fig_hist, ax = plt.subplots(figsize=(16, 3))
+                                        fig_hist, ax = plt.subplots(figsize=(16, 2))
                                         ax.plot(
                                             hist_df["week"],
                                             hist_df["appointments"],
@@ -1695,7 +1698,7 @@ if uploaded_files:
                                         )
 
                                         # Create dual-axis plot
-                                        fig_merged, ax1 = plt.subplots(figsize=(18, 3))
+                                        fig_merged, ax1 = plt.subplots(figsize=(16, 3))
 
                                         color1 = "#ab271f"
                                         ax1.set_xlabel("Week", fontsize=12)
@@ -1710,10 +1713,10 @@ if uploaded_files:
                                             label="Appointments",
                                         )
                                         ax1.tick_params(axis="y", labelcolor=color1)
-                                        ax1.grid(True, alpha=0.3, linestyle="--")
+                                        ax1.grid(True, alpha=0.3, linewidth=0.3)
 
                                         ax2 = ax1.twinx()
-                                        color2 = "black"
+                                        color2 = "#545e6a"
                                         ax2.set_ylabel(
                                             "Influenza Level", color=color2, fontsize=12
                                         )
@@ -1746,7 +1749,7 @@ if uploaded_files:
                                             loc="upper left",
                                             fontsize=10,
                                         )
-
+                                        ax1.grid(True, alpha=0.3, linewidth=0.3)
                                         plt.tight_layout()
                                         st.pyplot(fig_merged)
 
