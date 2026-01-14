@@ -2,6 +2,7 @@
 
 A Streamlit application for tracking GP surgery appointments and calculating Access metrics for the 2025-26 financial year. The app helps visualize appointment data, excluded "Did Not Attend" cases, and calculates weekly performance rates against targets.
 
+![screenshot](images/access-es-screen.png)
 ## Features
 -   **CSV Data Merging**: Upload multiple appointment CSV files to analyze them as one dataset.
 -   **Interactive Filtering**: Filter by Clinician, Rota Type, and Date Range.
