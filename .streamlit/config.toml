@@ -7,6 +7,8 @@ backgroundColor="#ffffff"
 secondaryBackgroundColor="#ededed"
 textColor="#374151"
 baseRadius="medium"
+codeBackgroundColor="#ededed"
+codeTextColor="#ae4f4d"
 
 redColor = "#ae4f4d"
 orangeColor = "#fb8500"
@@ -16,7 +18,6 @@ blueColor = "#659bb7"
 violetColor = "#db2777"
 grayColor = "#a3a3a3"
 
-codeBackgroundColor="#e8f2f5"
 
 [theme.sidebar]
 primaryColor="#659bb7"

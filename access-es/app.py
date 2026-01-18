@@ -5,12 +5,11 @@ from config import *
 from utils import *
 from plots import *
 from nbeats_forecasting import (
-    merge_and_prepare_training_data,
     train_nbeats_model_with_covariates,
     forecast_nbeats_model,
     plot_validation_and_forecast,
-    process_influenza_data,
-    process_historic_app_data,
+    create_train_data,
+  
 )
 from train_model import (
     prepare_training_data,
@@ -176,6 +175,22 @@ with st.sidebar:
         help="Display debug expander with calculations and dataframes.",
     )
 
+    # Download Filtered Data Button
+    if 'filtered_df_for_download' in st.session_state and st.session_state['filtered_df_for_download'] is not None:
+        csv_download = st.session_state['filtered_df_for_download'].to_csv(index=False)
+        st.download_button(
+            label="Download Filtered Data",
+            data=csv_download,
+            file_name="filtered_appointments.csv",
+            mime="text/csv",
+            type="secondary",
+            icon=":material/download:",
+            help="Download the filtered dataset with all date and rota type filters applied.",
+            use_container_width=True,
+        )
+    else:
+        st.info(":material/info: Upload data and apply filters to enable download.")
+
 # Main Content Area
 if uploaded_files:
     # Load and Combine Files
@@ -311,6 +326,9 @@ if uploaded_files:
                         f"({dna_percentage:.1f}% of total)",
                         color="blue",
                     )
+
+                # Store filtered_df in session state for download button
+                st.session_state['filtered_df_for_download'] = filtered_df.copy()
 
                 # Calculate time metrics
                 time_metrics = calculate_time_metrics(date_range)
@@ -902,6 +920,9 @@ if uploaded_files:
                         st.caption(
                             "Train Neural Network to predict future appointments demand."
                         )
+                        st.caption(
+                            "From SystmOne download historic appointment data for 2 - 3 years, breakdown to `Appointmetn date` `Appointment status` `Clinician` `Rota type` `Patient ID`, upload your csv files - influeanza data is provided centrally and goes back to 2021. Adjust the Date Slider to select where you want prediction to start. Your current dataset loaded at the top of the app is used for the current years training data. Remeber to filter your training data and exlude ARRS Staff. To do this load your training data at the top of the app first, filter as needed and check the `Debug + Export Mode` in the sidebar to export, now import this as your training data."
+                        )
 
                         # Upload additional training data
                         training_files = st.file_uploader(
@@ -1031,27 +1052,31 @@ if uploaded_files:
                                         f"✓ Loaded {len(training_dfs)} training files with {len(combined_training)} total rows"
                                     )
 
-                                    # Generate training dataset using new streamlined process
+                                    # Generate training dataset using consolidated function
                                     with st.spinner(
                                         "Preparing training dataset...", show_time=True
                                     ):
-                                        # Step 1: Process historic appointments
-                                        # Pass the slider's end date so training data ends at the selected date
-                                        historic_df, _ = process_historic_app_data(
-                                            combined_training,
+                                        # Use the new create_train_data function
+                                        # filtered_df contains current year data (from slider)
+                                        # combined_training contains historic data
+                                        train_ts, fig = create_train_data(
                                             filtered_df,
-                                            date_column=date_column_name,
-                                            app_column=appointments_column_name,
+                                            combined_training,
+                                            join_date=pd.Timestamp('2025-04-01')
                                         )
 
-                                        # Step 2: Get influenza data
-                                        flu_df, _ = process_influenza_data()
+                                        # Create metadata for display
+                                        metadata = {
+                                            'success': True,
+                                            'total_weeks': len(train_ts),
+                                            'start_date': train_ts.start_time(),
+                                            'end_date': train_ts.end_time(),
+                                            'training_weeks': len(train_ts),
+                                            'current_weeks': 0,
+                                            'components': train_ts.components.tolist(),
+                                            'message': f'Successfully created training data with {len(train_ts)} weeks'
+                                        }
 
-                                        # Step 3: Merge and create multivariate TimeSeries
-                                        train_ts, metadata = merge_and_prepare_training_data(
-                                            historic_df, flu_df
-                                        )
-                                        
                                     if metadata["success"]:
                                         # Store in session state
                                         st.session_state["train_ts"] = train_ts
@@ -1093,11 +1118,8 @@ if uploaded_files:
                                     f"Date Range: {metadata['start_date']} to {metadata['end_date']}",
                                     color="blue",
                                 )
-                                st.badge(
-                                    f"Components: {', '.join(metadata['components'])}",
-                                    color="blue",
-                                )
 
+                  
                                 # Train Model Button
                                 st.divider()
 
@@ -1196,7 +1218,7 @@ if uploaded_files:
                                     key="train_nbeats_button",
                                 ):
                                     # Spinner with status messages
-                                    with st.spinner("Training NBEATS Model..."):
+                                    with st.spinner("Training NBEATS Model...", show_time=True):
                                         status_messages = []
 
                                         def status_callback(msg):
@@ -1228,6 +1250,19 @@ if uploaded_files:
                                             for msg in status_messages:
                                                 st.write(f"• {msg}")
 
+                                        # Store hyperparameters used for training
+                                        trained_result['hyperparameters'] = {
+                                            'input_chunk_length': input_chunk_length,
+                                            'output_chunk_length': output_chunk_length,
+                                            'n_epochs': n_epochs,
+                                            'num_stacks': num_stacks,
+                                            'num_blocks': num_blocks,
+                                            'num_layers': num_layers,
+                                            'layer_widths': layer_widths,
+                                            'batch_size': batch_size,
+                                            'learning_rate': learning_rate,
+                                            'validation_split': validation_split,
+                                        }
                                         st.session_state["nbeats_trained_model"] = (
                                             trained_result
                                         )
@@ -1249,15 +1284,46 @@ if uploaded_files:
 
                                 # Show if model already trained
                                 if st.session_state.get("nbeats_model_trained", False):
-                                    st.success(
-                                        "✅ NBEats model is trained and ready for forecasting!"
-                                    )
                                     trained_result = st.session_state[
                                         "nbeats_trained_model"
                                     ]
-                                    st.info(
-                                        f"Training: {trained_result['training_weeks']} weeks | Validation: {trained_result['validation_weeks']} weeks"
-                                    )
+
+                                    # Check if hyperparameters have changed
+                                    stored_hp = trained_result.get('hyperparameters', {})
+                                    current_hp = {
+                                        'input_chunk_length': input_chunk_length,
+                                        'output_chunk_length': output_chunk_length,
+                                        'n_epochs': n_epochs,
+                                        'num_stacks': num_stacks,
+                                        'num_blocks': num_blocks,
+                                        'num_layers': num_layers,
+                                        'layer_widths': layer_widths,
+                                        'batch_size': batch_size,
+                                        'learning_rate': learning_rate,
+                                        'validation_split': validation_split,
+                                    }
+                                    hyperparameters_changed = stored_hp != current_hp
+
+                                    if hyperparameters_changed:
+                                        st.warning(
+                                            "⚠️ Hyperparameters have changed since the model was trained. "
+                                            "Please click 'Train NBEats Model' to retrain with new settings."
+                                        )
+                                        st.info(
+                                            f"Last trained with: input_chunk_length={stored_hp.get('input_chunk_length')}, "
+                                            f"output_chunk_length={stored_hp.get('output_chunk_length')}, "
+                                            f"num_blocks={stored_hp.get('num_blocks')}, "
+                                            f"num_layers={stored_hp.get('num_layers')}, "
+                                            f"layer_widths={stored_hp.get('layer_widths')}, "
+                                            f"validation_split={stored_hp.get('validation_split')}"
+                                        )
+                                    else:
+                                        st.success(
+                                            "✅ NBEats model is trained and ready for forecasting!"
+                                        )
+                                        st.info(
+                                            f"Training: {trained_result['training_weeks']} weeks | Validation: {trained_result['validation_weeks']} weeks"
+                                        )
 
                                     # Display validation metrics
                                     if "metrics" in trained_result:
@@ -1284,31 +1350,32 @@ if uploaded_files:
                                                 color="blue",
                                             )
 
-                                    # Display Validation and Forecast Plot
-                                    st.divider()
-                                    st.markdown(
-                                        "#### Validation & Forecast Visualization"
-                                    )
-                                    with st.spinner("Generating visualization..."):
-                                        # Get training metadata for plotting
-                                        training_metadata = st.session_state.get(
-                                            "training_metadata", {}
+                                    # Display Validation and Forecast Plot (only if hyperparameters haven't changed)
+                                    if not hyperparameters_changed:
+                                        st.divider()
+                                        st.markdown(
+                                            "#### Validation & Forecast Visualization"
                                         )
-                                        fig_val_forecast = plot_validation_and_forecast(
-                                            trained_result,
-                                            training_metadata=training_metadata,
-                                            validation_weeks=12,
-                                            forecast_weeks=12,
-                                        )
-                                        if fig_val_forecast is not None:
-                                            st.plotly_chart(
-                                                fig_val_forecast,
-                                                use_container_width=True,
+                                        with st.spinner("Generating visualization...", show_time=True):
+                                            # Get training metadata for plotting
+                                            training_metadata = st.session_state.get(
+                                                "training_metadata", {}
                                             )
-                                        else:
-                                            st.warning(
-                                                "Could not generate visualization"
+                                            fig_val_forecast = plot_validation_and_forecast(
+                                                trained_result,
+                                                training_metadata=training_metadata,
+                                                validation_weeks=trained_result['validation_weeks'],
+                                                forecast_weeks=12,
                                             )
+                                            if fig_val_forecast is not None:
+                                                st.plotly_chart(
+                                                    fig_val_forecast,
+                                                    width='stretch',
+                                                )
+                                            else:
+                                                st.warning(
+                                                    "Could not generate visualization"
+                                                )
 
                                     # Test Forecast Button - Store forecast for use in projection chart
                                     col1, col2 = st.columns([1, 1])
@@ -1319,7 +1386,7 @@ if uploaded_files:
                                             type='primary',
                                             icon=":material/add:"
                                         ):
-                                            with st.spinner("Generating forecast..."):
+                                            with st.spinner("Generating forecast...", show_time=True):
                                                 test_forecast_df = (
                                                     forecast_nbeats_model(
                                                         trained_result,
@@ -1368,7 +1435,7 @@ if uploaded_files:
                                             st.dataframe(
                                                 st.session_state["trajectory_forecast"],
                                                 hide_index=True,
-                                                use_container_width=True,
+                                                width='stretch',
                                             )
 
                                 # Convert TimeSeries to DataFrame for display

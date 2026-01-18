@@ -1,7 +1,8 @@
 streamlit
 pandas
 plotly
-darts
+u8darts[all]
 torch
 notionhelper
 seaborn
+holidays

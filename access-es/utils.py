@@ -34,11 +34,16 @@ def load_and_combine_csv_files(uploaded_files):
 
 def extract_duration_minutes(duration_series):
     """Extract duration from format '1h 30m' to total minutes"""
+    # Cast to string to prevent AttributeError if the series is numeric or contains NaNs
+    duration_series = duration_series.astype(str)
+    
     extracted = duration_series.str.extract(
         r"(?:(?P<hours>\d+)h)?\s?(?:(?P<minutes>\d+)m)?"
     )
+    
     hours = pd.to_numeric(extracted["hours"]).fillna(0)
     minutes = pd.to_numeric(extracted["minutes"]).fillna(0)
+    
     return (hours * 60) + minutes
 
 
