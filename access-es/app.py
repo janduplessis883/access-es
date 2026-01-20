@@ -4,18 +4,12 @@ import io
 from config import *
 from utils import *
 from plots import *
-from nbeats_forecasting import (
-    train_nbeats_model_with_covariates,
-    forecast_nbeats_model,
-    plot_validation_and_forecast,
-    create_train_data,
-  
-)
 from train_model import (
     prepare_training_data,
     train_nbeats_model,
     forecast_with_trained_model,
 )
+from nbeats_new import create_ts_data, run_nbeats_forecast, scale_and_split_ts, plot_forecast_result, full_predict
 
 # Page Configuration
 st.set_page_config(page_title=PAGE_TITLE, layout=PAGE_LAYOUT, page_icon=PAGE_ICON)
@@ -1059,39 +1053,17 @@ if uploaded_files:
                                         # Use the new create_train_data function
                                         # filtered_df contains current year data (from slider)
                                         # combined_training contains historic data
-                                        train_ts, fig = create_train_data(
-                                            filtered_df,
-                                            combined_training,
-                                            join_date=pd.Timestamp('2025-04-01')
-                                        )
-
-                                        # Create metadata for display
-                                        metadata = {
-                                            'success': True,
-                                            'total_weeks': len(train_ts),
-                                            'start_date': train_ts.start_time(),
-                                            'end_date': train_ts.end_time(),
-                                            'training_weeks': len(train_ts),
-                                            'current_weeks': 0,
-                                            'components': train_ts.components.tolist(),
-                                            'message': f'Successfully created training data with {len(train_ts)} weeks'
-                                        }
-
-                                    if metadata["success"]:
-                                        # Store in session state
-                                        st.session_state["train_ts"] = train_ts
-                                        st.session_state["training_metadata"] = metadata
-                                        st.session_state["load_training_data"] = (
-                                            False  # Reset flag
-                                        )
-                                        st.rerun()  # Rerun to show the loaded data
-                                    else:
-                                        st.error(f"❌ {metadata['message']}")
-                                        st.session_state["load_training_data"] = False
-
+                                        combined, fig = create_ts_data(filtered_df, combined_training)
+                                        st.pyplot(fig)
+                                        st.sleep(10)
+                                        st.session_state["train_ts"] = combined
+                                        st.session_state["train_plot"] = fig
+                                        st.rerun()
+                                        st.pyplot(st.session_state["train_plot"]) 
+                                          
                             except Exception as e:
                                 st.error(f"Error generating training dataset: {str(e)}")
-                                st.session_state["load_training_data"] = False
+                           
 
                         # Display loaded training data if available
                         if data_already_loaded:
@@ -1122,7 +1094,7 @@ if uploaded_files:
                   
                                 # Train Model Button
                                 st.divider()
-
+                            
                                 st.write("**Set Hyperparameters:**")
                                 col1, col2, col3, col4, col5 = st.columns(5)
                                 with col1:
@@ -1219,11 +1191,7 @@ if uploaded_files:
                                 ):
                                     # Spinner with status messages
                                     with st.spinner("Training NBEATS Model...", show_time=True):
-                                        status_messages = []
-
-                                        def status_callback(msg):
-                                            status_messages.append(msg)
-
+                                        
                                         trained_result = train_nbeats_model_with_covariates(
                                             train_ts,
                                             input_chunk_length=input_chunk_length,
@@ -1462,8 +1430,7 @@ if uploaded_files:
                                     file_name="training_dataset.csv",
                                     mime="text/csv",
                                 )
-                            else:
-                                st.error(f"❌ {metadata['message']}")
+
 
                 st.space(size="small")
 

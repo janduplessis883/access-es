@@ -14,58 +14,76 @@ import holidays
 
 # --- create_ts_data (kept logically the same) ---
 
-def create_ts_data():
-    # 1. Influenza Data from Notion
-    nh = NotionHelper(st.secrets['NOTION_TOKEN'])
-    data_id = st.secrets['DATA_ID']
-    inf = nh.get_data_source_pages_as_dataframe(data_id)
-    
-    inf.drop(columns=['Name', 'notion_page_id'], inplace=True)
-    inf.columns = ['inf', 'week']
-    inf['week'] = pd.to_datetime(inf['week'], format='mixed', yearfirst=True)
-    inf.sort_values(by='week', inplace=True)
-    inf.dropna(inplace=True)
-    
-    # 2. Load and Combine Appointment Data
-    filtered_df = pd.read_csv('/Users/janduplessis/Downloads/filtered_appointments_current.csv')
-    h_data = pd.read_csv('/Users/janduplessis/Downloads/Historic_filtered_appointments.csv')
-    
-    filtered_df['appointment_date'] = pd.to_datetime(filtered_df['appointment_date'], format='%Y-%m-%d')
-    h_data['appointment_date'] = pd.to_datetime(h_data['appointment_date'], format='%Y-%m-%d')
-    
+def create_ts_data(filtered_df, h_data, inf_df=None):
+    """
+    Create time series data from appointment dataframes.
+
+    Args:
+        filtered_df: Current appointments DataFrame with 'appointment_date' column
+        h_data: Historic appointments DataFrame with 'appointment_date' column
+        inf_df: Optional influenza DataFrame (will fetch from Notion if None)
+
+    Returns:
+        tuple: (TimeSeries object, matplotlib.figure.Figure)
+    """
+    # 1. Influenza Data from Notion (if not provided)
+    if inf_df is None:
+        nh = NotionHelper(st.secrets['NOTION_TOKEN'])
+        data_id = st.secrets['DATA_ID']
+        inf = nh.get_data_source_pages_as_dataframe(data_id)
+
+        inf.drop(columns=['Name', 'notion_page_id'], inplace=True)
+        inf.columns = ['inf', 'week']
+        inf['week'] = pd.to_datetime(inf['week'], format='mixed', yearfirst=True)
+        inf.sort_values(by='week', inplace=True)
+        inf.dropna(inplace=True)
+    else:
+        inf = inf_df.copy()
+
+    # 2. Process Appointment Data
+    filtered_df = filtered_df.copy()
+    h_data = h_data.copy()
+    try:
+        filtered_df['appointment_date'] = pd.to_datetime(filtered_df['appointment_date'], format='%Y-%m-%d')
+        h_data['appointment_date'] = pd.to_datetime(h_data['appointment_date'], format='%Y-%m-%d')
+    except Exception as e:
+        filtered_df['appointment_date'] = pd.to_datetime(filtered_df['appointment_date'], format='%d-%b-%y')
+        h_data['appointment_date'] = pd.to_datetime(h_data['appointment_date'], format='%d-%b-%y')
+
     join_date = pd.Timestamp('2025-04-01')
     filtered_df_new = filtered_df[filtered_df['appointment_date'] >= join_date].copy()
     h_data_new = h_data[h_data['appointment_date'] < join_date].copy()
-    
+
     full_train_apps = pd.concat([h_data_new, filtered_df_new], axis=0)
     full_train_apps.sort_values(by='appointment_date', inplace=True)
-    
+
     # 3. Resample to Weekly Target
     full_train = full_train_apps.resample('W', on='appointment_date').size().reset_index(name='apps')
     full_train.columns = ['week', 'apps']
-    
+
     # 4. Feature Engineering: 4-Week Rolling Mean
-    full_train['apps_rolling'] = full_train['apps'].rolling(window=4, min_periods=1).mean()
-    
+    full_train['apps_rolling4'] = full_train['apps'].rolling(window=4, min_periods=1).mean()
+    full_train['apps_rolling8'] = full_train['apps'].rolling(window=8, min_periods=1).mean()
+
     # 5. Feature Engineering: Weekly Working Days (The "Holiday Fix")
     start_date = full_train['week'].min()
     end_date = full_train['week'].max() + pd.Timedelta(weeks=12)
     all_days = pd.date_range(start=start_date, end=end_date, freq='D')
-    
+
     df_days = pd.DataFrame({'date': all_days})
     df_days['is_weekday'] = df_days['date'].dt.dayofweek < 5
-    
+
     # UK bank holidays – England
     uk_holidays = holidays.UnitedKingdom(subdiv='England')
     df_days['is_bank_holiday'] = df_days['date'].apply(lambda x: x in uk_holidays)
-    
+
     # Working day if weekday and not bank holiday
     df_days['work_day_val'] = (df_days['is_weekday'] & ~df_days['is_bank_holiday']).astype(int)
-    
+
     # Weekly work days
     weekly_work_days = df_days.resample('W', on='date')['work_day_val'].sum().reset_index()
     weekly_work_days.columns = ['week', 'work_days']
-    
+
     # Merge into main data
     combined = inf.merge(full_train, on='week', how='inner')  # Use inner join to avoid NaNs
     combined = combined.merge(weekly_work_days, on='week', how='inner')
@@ -80,14 +98,34 @@ def create_ts_data():
     combined_ts = TimeSeries.from_dataframe(
         combined,
         time_col='week',
-        value_cols=['apps', 'inf', 'apps_rolling', 'work_days'],
+        value_cols=['apps', 'inf', 'apps_rolling4',  'apps_rolling8','work_days'],
         freq='W'
     )
 
     # Verify no NaN in the series
     print(f"Debug - Combined TS has NaN: {np.isnan(combined_ts.values()).any()}")
+
+    # Create plot with distinct colors for each series
+    fig, ax = plt.subplots(figsize=(16, 4))
+    combined_ts['apps'].plot(ax=ax, label='Apps', color='#c0c0c0', alpha=0.8, linewidth=1.4)
+    combined_ts['inf'].plot(ax=ax, label='Influenza', color='#434346', alpha=0.7, linewidth=1.2)
+    combined_ts['apps_rolling4'].plot(ax=ax, label='4-Week Rolling Avg', color='#83944f', alpha=0.7, linewidth=1.2)
+    combined_ts['apps_rolling8'].plot(ax=ax, label='8-Week Rolling Avg', color='#4a6977', alpha=0.7, linewidth=1.2)
     
-    return combined_ts
+    # Plot work_days on secondary y-axis (different scale)
+    ax2 = ax.twinx()
+    combined_ts['work_days'].plot(ax=ax2, label='Work Days', color='#bf7f70', alpha=0.6, linewidth=1)
+    ax2.set_ylabel('Work Days', color='#bf7f70')
+    ax2.tick_params(axis='y', labelcolor='#bf7f70')
+    ax2.set_ylim(0, 6)
+    
+    ax.set_title("Time Series Data with Holiday Awareness", fontsize=16, fontweight='bold')
+    ax.legend(loc='upper left')
+    ax2.legend(loc='upper right')
+    ax.grid(True, alpha=0.2)
+    plt.tight_layout()
+
+    return combined_ts, fig
 
 
 def scale_and_split_ts(combined_ts, test_size=12):
@@ -109,7 +147,7 @@ def scale_and_split_ts(combined_ts, test_size=12):
     full_target = target_scaler.transform(combined_ts['apps'])
     
     # 4. Fit and transform covariates (inf, apps_rolling, AND work_days)
-    cov_cols = ['inf', 'apps_rolling', 'work_days']
+    cov_cols = ['inf', 'apps_rolling4', 'apps_rolling8', 'work_days']
     
     cov_scaler.fit(train[cov_cols])
     train_cov = cov_scaler.transform(train[cov_cols])
@@ -144,7 +182,7 @@ def calculate_metrics(val_original, val_pred_original):
     
     metrics_df = pd.DataFrame(metrics_dict)
     
-    print("\n📊 Model Performance Metrics:")
+    print("\nModel Performance Metrics:")
     print(metrics_df.to_string(index=False))
     
     return metrics_df
@@ -153,23 +191,35 @@ def calculate_metrics(val_original, val_pred_original):
 def plot_forecast_result(full_series_unscaled, val_pred_orig, future_pred_orig, metric_score):
     """
     Plots the probabilistic forecast with holiday awareness.
-    """
-    print(f"Debug - Historical: {full_series_unscaled['apps'].start_time} to {full_series_unscaled['apps'].end_time}")
-    print(f"Debug - Val pred: {val_pred_orig.start_time} to {val_pred_orig.end_time}")
-    print(f"Debug - Future pred: {future_pred_orig.start_time} to {future_pred_orig.end_time}")
+    Returns the figure for display in Streamlit.
 
+    Args:
+        full_series_unscaled: Combined TimeSeries with apps, inf, apps_rolling, work_days
+        val_pred_orig: Validation/backtest predictions (probabilistic)
+        future_pred_orig: Future forecast predictions (probabilistic)
+        metric_score: sMAPE metric value
+
+    Returns:
+        matplotlib.figure.Figure: The plot figure
+    """
     fig, ax = plt.subplots(figsize=(16, 8))
 
     # 1. Plot Actual Apps (Gray) - full historical
     full_series_unscaled['apps'].plot(
-        ax=ax, label='Actual Apps', color='#999999', alpha=0.4, linewidth=1
+        ax=ax, label='Actual Apps', color='#c0c0c0', alpha=0.6, linewidth=1
     )
 
-    # 2. Plot 4-Week Rolling Average (Dashed Dark Gray)
-    if 'apps_rolling' in full_series_unscaled.components:
-        full_series_unscaled['apps_rolling'].plot(
+    # 2. Plot 4-Week and 8-Week Rolling Averages
+    if 'apps_rolling4' in full_series_unscaled.components:
+        full_series_unscaled['apps_rolling4'].plot(
             ax=ax, label='4-Week Rolling Avg',
-            color='#444444', linestyle='--', linewidth=1.5, alpha=0.6
+            color='#83944f', linestyle='solid', linewidth=1, alpha=0.7
+        )
+    
+    if 'apps_rolling8' in full_series_unscaled.components:
+        full_series_unscaled['apps_rolling8'].plot(
+            ax=ax, label='8-Week Rolling Avg',
+            color='#4a6977', linestyle='solid', linewidth=1, alpha=0.7
         )
 
     # 3. Plot Work Days (Capacity Indicator) on Secondary Axis
@@ -177,22 +227,21 @@ def plot_forecast_result(full_series_unscaled, val_pred_orig, future_pred_orig, 
     if 'work_days' in full_series_unscaled.components:
         ax2 = ax.twinx()
         full_series_unscaled['work_days'].plot(
-            ax=ax2, label='Work Days', color='red', linestyle=':', alpha=0.2
+            ax=ax2, label='Work Days', color='#bf7f70', linestyle=':', alpha=0.2
         )
         ax2.set_ylim(0, 6)
-        ax2.set_ylabel("Working Days", color='red', alpha=0.5)
-        ax2.tick_params(axis='y', labelcolor='red', labelsize=8)
+        ax2.set_ylabel("Working Days", color='#bf7f70', alpha=0.5)
+        ax2.tick_params(axis='y', labelcolor='#bf7f70', labelsize=8)
 
-    # 4. Plot Backtest (Orange) - use Darts' built-in quantile plotting
-    # First, ensure val_pred_orig is a deterministic series by taking the median
+    # 4. Plot Backtest (Orange)
     val_median = val_pred_orig.quantile(0.5)
-    val_median.plot(ax=ax, label='Backtest', color='#FF8C00', linewidth=2)
+    val_median.plot(ax=ax, label='Backtest', color='#FF8C00', linewidth=1)
 
     # 5. Plot Future Forecast (Blue)
     future_median = future_pred_orig.quantile(0.5)
     future_median.plot(ax=ax, label='12-Week Forecast', color='#1f77b4', linewidth=2.5)
 
-    # 6. Add uncertainty bands manually as shaded area
+    # 6. Add uncertainty bands as shaded area
     val_p10 = val_pred_orig.quantile(0.1)
     val_p90 = val_pred_orig.quantile(0.9)
     ax.fill_between(
@@ -231,7 +280,8 @@ def plot_forecast_result(full_series_unscaled, val_pred_orig, future_pred_orig, 
     ax.legend(loc='upper left')
     ax.grid(True, which='both', alpha=0.1)
     plt.tight_layout()
-    plt.show()
+
+    return fig
 
 
 # --- Model Training & Forecast ---
@@ -256,8 +306,8 @@ def run_nbeats_forecast(
     target_train = train_scaled['apps']
     target_val = val_scaled['apps']
     target_full = series_scaled['apps']
-    
-    cov_cols = ['inf', 'apps_rolling', 'work_days']
+
+    cov_cols = ['inf', 'apps_rolling4', 'apps_rolling8', 'work_days']
     past_cov_train = train_scaled[cov_cols]
     past_cov_full = series_scaled[cov_cols]
 
@@ -277,7 +327,7 @@ def run_nbeats_forecast(
         random_state=42,
         pl_trainer_kwargs={"accelerator": "cpu", "gradient_clip_val": 1.0}
     )
-    
+
     # 3. Fit Model
     model.fit(
         series=target_train,
@@ -286,18 +336,18 @@ def run_nbeats_forecast(
         val_past_covariates=past_cov_full,
         verbose=True
     )
-    
+
     # 4. Generate Probabilistic Predictions
     pred_val_scaled = model.predict(
         n=len(target_val),
         series=target_train,
-        past_covariates=past_cov_train,
+        past_covariates=past_cov_full,  # Use full series to cover prediction period
         num_samples=100
     )
     pred_future_scaled = model.predict(
         n=future_weeks,
         series=target_full,
-        past_covariates=past_cov_full,
+        past_covariates=past_cov_full,  # Already extended in create_ts_data
         num_samples=100
     )
 
@@ -321,45 +371,53 @@ def run_nbeats_forecast(
     # 7. Plot Result using the *unscaled* original series
     print(f"Components available for plotting: {combined_ts.components}")
     print(f"Validation Prediction samples: {val_pred_orig.n_samples}")
-    plot_forecast_result(combined_ts, val_pred_orig, pred_future_orig, current_smape)
-    
-    return pred_future_orig, metrics_results, model
+    fig = plot_forecast_result(combined_ts, val_pred_orig, pred_future_orig, current_smape)
+
+    return pred_future_orig, metrics_results, model, fig
 
 
-if __name__ == "__main__":
+def full_predict():
     print("🚧 Starting Script")
-    
-    # 1. Build time series with holiday-aware features
-    combined = create_ts_data()
+
+    # 1. Load data from files (for standalone testing)
+    filtered_df = pd.read_csv('/Users/janduplessis/Downloads/filtered_appointments.csv')
+    h_data = pd.read_csv('/Users/janduplessis/Downloads/Historic_filtered_appointments.csv')
+
+    # 2. Build time series with holiday-aware features
+    combined_ts, _ = create_ts_data(filtered_df, h_data)
 
     # 2. Scale and Split
     train_scaled, val_scaled, series_scaled, target_scaler, cov_scaler = scale_and_split_ts(
-        combined,
-        test_size=12
+        combined_ts,
+        test_size=24
     )
     print("💾 Time Series scaled")
-    
+
     # 3. Define User Parameters
     selected_params = {
         "input_chunk_length": 52,
         "output_chunk_length": 12,
         "generic_architecture": False,
-        "num_blocks": 3,
+        "num_blocks": 4,
         "num_layers": 4,
-        "layer_widths": 256,
+        "layer_widths": 512,
         "n_epochs": 150,
-        "batch_size": 64,
+        "batch_size": 128,
         "learning_rate": 0.0001  # Standard default is 1e-3
     }
 
     # 4. Run Forecast and Generate Plot
-    forecast_series, metrics_results, trained_model = run_nbeats_forecast(
+    forecast_series, metrics_results, trained_model, fig = run_nbeats_forecast(
         train_scaled=train_scaled,
         val_scaled=val_scaled,
         series_scaled=series_scaled,
         target_scaler=target_scaler,
         cov_scaler=cov_scaler,
         user_params=selected_params,
-        combined_ts=combined,
+        combined_ts=combined_ts,
         future_weeks=12
     )
+    plt.show()
+
+if __name__ == "__main__":
+    full_predict()
