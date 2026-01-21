@@ -1,15 +1,11 @@
 import streamlit as st
 import pandas as pd
 import io
+import time
 from config import *
 from utils import *
 from plots import *
-from train_model import (
-    prepare_training_data,
-    train_nbeats_model,
-    forecast_with_trained_model,
-)
-from nbeats_new import create_ts_data, run_nbeats_forecast, scale_and_split_ts, plot_forecast_result, full_predict
+from nbeats_new import create_ts_data, train_model_for_app, scale_and_split_ts, plot_forecast_result
 
 # Page Configuration
 st.set_page_config(page_title=PAGE_TITLE, layout=PAGE_LAYOUT, page_icon=PAGE_ICON)
@@ -394,6 +390,41 @@ if uploaded_files:
                         f"max: {filtered_df['book_to_app'].max():.2f} minutes ",
                         icon=":material/health_cross:",
                     )
+                    # Clinician Stats
+                    with st.expander("Clinician Stats | Appointment Duration | DNA Breakdown", icon=":material/stethoscope:"):
+                        st.subheader(":material/stethoscope: Clinician Stats")
+
+                        # Boxplot
+                        fig_box = create_duration_boxplot(
+                            filtered_df_with_dna, selected_clinicians
+                        )
+                        st.plotly_chart(fig_box, width="stretch")
+
+                        st.caption(
+                            "The boxplot shows the distribution of appointment durations: "
+                            "the box represents the middle 50% of durations, the line inside shows the median, "
+                            "and dots indicate outliers."
+                        )
+
+                        st.divider()
+                        st.markdown("#### Appointment Stats by Clinician")
+
+                        # Calculate stats
+                        stats_df = calculate_clinician_stats(
+                            filtered_df_with_dna, selected_clinicians
+                        )
+
+                        if stats_df is not None:
+
+                            fig_histograms = create_clinician_stats_histograms(stats_df)
+                            st.pyplot(fig_histograms)
+                            # Add 1x4 histogram subplot using seaborn
+                            st.divider()
+                            st.dataframe(stats_df, width="stretch", hide_index=True)
+                        else:
+                            st.warning(
+                                "No clinician data available for the selected filters."
+                            )
 
                 # Weekly & Monthly Trends
                 with st.expander(
@@ -647,6 +678,15 @@ if uploaded_files:
                         fig_proj = create_projection_chart(proj_df, list_size)
                         st.plotly_chart(fig_proj, width="stretch")
 
+                        # Show training plot if model is trained
+                        if st.session_state.get("nbeats_model_trained", False):
+                            trained_model_result = st.session_state.get("nbeats_trained_model", {})
+                            if 'figure' in trained_model_result and trained_model_result['figure'] is not None:
+                                st.divider()
+                                st.markdown("#### :material/online_prediction: NBEats Model Visualization")
+                                st.caption("Trained model performance showing backtest validation and 12-week forecast with confidence intervals")
+                                st.plotly_chart(trained_model_result['figure'], use_container_width=True, key="target_calc_training_plot")
+
                         # Show forecast details if available
                         if forecast_df is not None:
                             with st.expander("View Forecast Details", expanded=False, icon=":material/expand_circle_down:"):
@@ -859,41 +899,7 @@ if uploaded_files:
                                 )
                 st.space(size="small")
 
-                # Clinician Stats
-                with st.expander("Clinician Stats", icon=":material/stethoscope:"):
-                    st.subheader(":material/stethoscope: Clinician Stats")
 
-                    # Boxplot
-                    fig_box = create_duration_boxplot(
-                        filtered_df_with_dna, selected_clinicians
-                    )
-                    st.plotly_chart(fig_box, width="stretch")
-
-                    st.caption(
-                        "The boxplot shows the distribution of appointment durations: "
-                        "the box represents the middle 50% of durations, the line inside shows the median, "
-                        "and dots indicate outliers."
-                    )
-
-                    st.divider()
-                    st.markdown("#### Appointment Stats by Clinician")
-
-                    # Calculate stats
-                    stats_df = calculate_clinician_stats(
-                        filtered_df_with_dna, selected_clinicians
-                    )
-
-                    if stats_df is not None:
-
-                        fig_histograms = create_clinician_stats_histograms(stats_df)
-                        st.pyplot(fig_histograms)
-                        # Add 1x4 histogram subplot using seaborn
-                        st.divider()
-                        st.dataframe(stats_df, width="stretch", hide_index=True)
-                    else:
-                        st.warning(
-                            "No clinician data available for the selected filters."
-                        )
 
                 # Debug Information
                 expander_open_debug = show_dataframe
@@ -1014,7 +1020,7 @@ if uploaded_files:
                                 f"✅ Model trained! {st.session_state.get('training_weeks', 0)} weeks of data used."
                             )
 
-                        st.divider()
+                        
 
                         # Only process training data when button is clicked OR data already loaded
                         should_process = st.session_state.get(
@@ -1047,364 +1053,294 @@ if uploaded_files:
                                     )
 
                                     # Generate training dataset using consolidated function
-                                    with st.spinner(
-                                        "Preparing training dataset...", show_time=True
-                                    ):
-                                        # Use the new create_train_data function
-                                        # filtered_df contains current year data (from slider)
-                                        # combined_training contains historic data
+                                    with st.status(":material/data_object: Preparing training dataset...", expanded=False) as status:
+                                        time.sleep(2)
+                                        status.update(label=":material/archive: Combining Historic & Current Appointment Data...", state="running", expanded=False)
+                                        time.sleep(2)
+                                        status.update(label=":material/coronavirus: Importing Influenza Index & :material/avg_time: Calculating Rolling Averages...", state="running", expanded=False)
                                         combined, fig = create_ts_data(filtered_df, combined_training)
-                                        st.pyplot(fig)
-                                        st.sleep(10)
+                                        status.update(label=":material/chart_data: Plotting Training Data...", state="running", expanded=False)
+                                        time.sleep(1.5)
+                                        
                                         st.session_state["train_ts"] = combined
                                         st.session_state["train_plot"] = fig
-                                        st.rerun()
-                                        st.pyplot(st.session_state["train_plot"]) 
+                                        
+                                        status.update(label="Training Data Ready!", state="complete", expanded=True)
+                                       
+                                        st.pyplot(fig)
+                                    
+                                    # Trigger rerun to show hyperparameters section
+                                    st.rerun()
                                           
                             except Exception as e:
                                 st.error(f"Error generating training dataset: {str(e)}")
                            
 
-                        # Display loaded training data if available
+                        # Display loaded training data if available  
                         if data_already_loaded:
-                            metadata = st.session_state.get("training_metadata", {})
-                            train_ts = st.session_state["train_ts"]
-
-                            if metadata.get("success", False):
-                                # Display metadata
-                                col1, col2, col3, col4 = st.columns(4)
-                                with col1:
-                                    st.metric("Total Weeks", metadata["total_weeks"])
-                                with col2:
-                                    st.metric(
-                                        "Training Weeks", metadata["training_weeks"]
-                                    )
-                                with col3:
-                                    st.metric(
-                                        "Current Weeks", metadata["current_weeks"]
-                                    )
-                                with col4:
-                                    st.metric("Components", len(metadata["components"]))
-
-                                st.badge(
-                                    f"Date Range: {metadata['start_date']} to {metadata['end_date']}",
-                                    color="blue",
+                            train_ts = st.session_state.get("train_ts", None)
+                            
+                            # Display the loaded plot
+                            fig = st.session_state.get('train_plot', None)
+                            if fig:
+                                st.pyplot(fig)
+                            
+                            st.divider()
+                            st.markdown("### :material/tune: Hyperparameters & Training")
+                            
+                            st.write("**Set Hyperparameters:**")
+                            col1, col2, col3, col4, col5 = st.columns(5)
+                            with col1:
+                                input_chunk_length = st.number_input(
+                                    "input_chunk_length",
+                                    min_value=1,
+                                    max_value=156,
+                                    step=1,
+                                    value=104,
+                                )
+                            with col2:
+                                output_chunk_length = st.number_input(
+                                    "output_chunk_length",
+                                    min_value=1,
+                                    max_value=12,
+                                    step=1,
+                                    value=12,
+                                )
+                            with col3:
+                                n_epochs = st.number_input(
+                                    "n_epochs",
+                                    min_value=10,
+                                    max_value=200,
+                                    step=10,
+                                    value=150,
+                                )
+                            with col4:
+                                batch_size = st.number_input(
+                                    "batch_size",
+                                    min_value=16,
+                                    max_value=1024,
+                                    step=8,
+                                    value=64,
+                                )
+                            with col5:
+                                learning_rate = st.number_input(
+                                    "learning_rate",
+                                    min_value=0.0001,
+                                    max_value=0.01,
+                                    step=0.00005,
+                                    value=0.0001,
+                                    format="%0.4f",
                                 )
 
-                  
-                                # Train Model Button
-                                st.divider()
-                            
-                                st.write("**Set Hyperparameters:**")
-                                col1, col2, col3, col4, col5 = st.columns(5)
-                                with col1:
-                                    input_chunk_length = st.number_input(
-                                        "input_chunk_length",
-                                        min_value=1,
-                                        max_value=156,
-                                        step=1,
-                                        value=52,
-                                    )
-                                with col2:
-                                    output_chunk_length = st.number_input(
-                                        "output_chunk_length",
-                                        min_value=1,
-                                        max_value=36,
-                                        step=1,
-                                        value=12,
-                                    )
-                                with col3:
-                                    n_epochs = st.number_input(
-                                        "n_epochs",
-                                        min_value=10,
-                                        max_value=200,
-                                        step=10,
-                                        value=100,
-                                    )
-                                with col4:
-                                    batch_size = st.number_input(
-                                        "batch_size",
-                                        min_value=16,
-                                        max_value=1024,
-                                        step=8,
-                                        value=32,
-                                    )
-                                with col5:
-                                    learning_rate = st.number_input(
-                                        "learning_rate",
-                                        min_value=0.0005,
-                                        max_value=0.1,
-                                        step=0.0005,
-                                        value=0.0005,
-                                        format="%0.4f",
-                                    )
+                            col1, col2, col3, col4, col5 = st.columns(5)
+                            with col1:
+                                num_blocks = st.number_input(
+                                    "num_blocks",
+                                    min_value=1,
+                                    max_value=10,
+                                    step=1,
+                                    value=5,
+                                )
+                            with col2:
+                                num_stacks = st.number_input(
+                                    "num_stacks",
+                                    min_value=10,
+                                    max_value=60,
+                                    step=10,
+                                    value=50,
+                                )
+                            with col3:
+                                num_layers = st.number_input(
+                                    "num_layers",
+                                    min_value=1,
+                                    max_value=32,
+                                    step=1,
+                                    value=4,
+                                )
+                            with col4:
+                                layer_widths = st.number_input(
+                                    "layer_widths",
+                                    min_value=32,
+                                    max_value=2048,
+                                    step=8,
+                                    value=1024,
+                                )
+                            with col5:
+                                dropout = st.number_input(
+                                    "dropout",
+                                    min_value=0.0,
+                                    max_value=1.0,
+                                    step=0.05,
+                                    value=0.2,
+                                )
 
-                                col1, col2, col3, col4, col5 = st.columns(5)
-                                with col1:
-                                    num_stacks = st.number_input(
-                                        "num_stacks",
-                                        min_value=10,
-                                        max_value=120,
-                                        step=10,
-                                        value=30,
+                            if st.button(
+                                "Train NBEats Model",
+                                type="primary",
+                                use_container_width=True,
+                                icon=":material/neurology:",
+                                key="train_nbeats_button",
+                            ):
+                                # Status indicator for training
+                                with st.status(f"Training N-BEATS Model ({n_epochs} epochs)...", expanded=True) as status:
+                                    st.write(f":material/settings: Configuration: {num_stacks} stacks, {num_blocks} blocks, {num_layers} layers")
+                                    st.write(f":material/model_training: Training on {len(train_ts)} weeks of data")
+                                    
+                                    # Actually train the model
+                                    trained_result = train_model_for_app(
+                                        train_ts,
+                                        input_chunk_length=input_chunk_length,
+                                        output_chunk_length=output_chunk_length,
+                                        n_epochs=n_epochs,
+                                        num_blocks=num_blocks,
+                                        num_stacks=num_stacks,
+                                        num_layers=num_layers,
+                                        layer_widths=layer_widths,
+                                        batch_size=batch_size,
+                                        learning_rate=learning_rate,
+                                        dropout=dropout,
                                     )
-                                with col2:
-                                    num_blocks = st.number_input(
-                                        "num_blocks",
-                                        min_value=1,
-                                        max_value=10,
-                                        step=1,
-                                        value=1,
-                                    )
-                                with col3:
-                                    num_layers = st.number_input(
-                                        "num_layers",
-                                        min_value=1,
-                                        max_value=32,
-                                        step=1,
-                                        value=4,
-                                    )
-                                with col4:
-                                    layer_widths = st.number_input(
-                                        "layer_widths",
-                                        min_value=32,
-                                        max_value=2048,
-                                        step=8,
-                                        value=512,
-                                    )
-                                with col5:
-                                    validation_split = st.number_input(
-                                        "validation_split",
-                                        min_value=0.1,
-                                        max_value=0.8,
-                                        step=0.1,
-                                        value=0.2,
-                                        format="%0.1f",
-                                    )
+                                    
+                                    status.update(label="Training Complete!", state="complete")
 
-                                if st.button(
-                                    "Train NBEats Model",
-                                    type="primary",
-                                    use_container_width=True,
-                                    icon=":material/neurology:",
-                                    key="train_nbeats_button",
-                                ):
-                                    # Spinner with status messages
-                                    with st.spinner("Training NBEATS Model...", show_time=True):
-                                        
-                                        trained_result = train_nbeats_model_with_covariates(
-                                            train_ts,
-                                            input_chunk_length=input_chunk_length,
-                                            output_chunk_length=output_chunk_length,
-                                            n_epochs=n_epochs,
-                                            num_stacks=num_stacks,
-                                            num_blocks=num_blocks,
-                                            num_layers=num_layers,
-                                            layer_widths=layer_widths,
-                                            batch_size=batch_size,
-                                            learning_rate=learning_rate,
-                                            validation_split=validation_split,
-                                            status_callback=status_callback,
-                                        )
-
-                                    # Show status after training completes
-                                    if trained_result["success"]:
-                                        st.status(
-                                            "Training Complete!",
-                                            state="complete",
-                                            expanded=False
-                                        )
-                                        with st.expander("Training Details", expanded=False):
-                                            for msg in status_messages:
-                                                st.write(f"• {msg}")
-
-                                        # Store hyperparameters used for training
-                                        trained_result['hyperparameters'] = {
-                                            'input_chunk_length': input_chunk_length,
-                                            'output_chunk_length': output_chunk_length,
-                                            'n_epochs': n_epochs,
-                                            'num_stacks': num_stacks,
-                                            'num_blocks': num_blocks,
-                                            'num_layers': num_layers,
-                                            'layer_widths': layer_widths,
-                                            'batch_size': batch_size,
-                                            'learning_rate': learning_rate,
-                                            'validation_split': validation_split,
-                                        }
-                                        st.session_state["nbeats_trained_model"] = (
-                                            trained_result
-                                        )
-                                        st.session_state["nbeats_model_trained"] = (
-                                            True
-                                        )
-                                        st.success(
-                                            f"NBEats Model Trained! {trained_result['training_weeks']} weeks used."
-                                        )
-                                        st.rerun()
-                                    else:
-                                        st.status(
-                                            "Training Failed",
-                                            state="error",
-                                            expanded=True
-                                        )
-                                        with st.expander("Error Details"):
-                                            st.error(trained_result["message"])
-
-                                # Show if model already trained
-                                if st.session_state.get("nbeats_model_trained", False):
-                                    trained_result = st.session_state[
-                                        "nbeats_trained_model"
-                                    ]
-
-                                    # Check if hyperparameters have changed
-                                    stored_hp = trained_result.get('hyperparameters', {})
-                                    current_hp = {
+                                # Show status after training completes
+                                if trained_result and trained_result["success"]:
+                                    # Store hyperparameters used for training
+                                    trained_result['hyperparameters'] = {
                                         'input_chunk_length': input_chunk_length,
                                         'output_chunk_length': output_chunk_length,
                                         'n_epochs': n_epochs,
-                                        'num_stacks': num_stacks,
                                         'num_blocks': num_blocks,
+                                        'num_stacks': num_stacks,
                                         'num_layers': num_layers,
                                         'layer_widths': layer_widths,
                                         'batch_size': batch_size,
                                         'learning_rate': learning_rate,
-                                        'validation_split': validation_split,
+                                        'dropout': dropout,
                                     }
-                                    hyperparameters_changed = stored_hp != current_hp
+                                    st.session_state["nbeats_trained_model"] = trained_result
+                                    st.session_state["nbeats_model_trained"] = True
+                                    
+                                    # Store the 12-week forecast for automatic use
+                                    if 'forecast_df' in trained_result:
+                                        st.session_state["trajectory_forecast"] = trained_result['forecast_df']
+                                    
+                                    st.success(f"✅ NBEats Model Trained! {trained_result['training_weeks']} weeks used.")
+                                    st.rerun()
+                                elif trained_result:
+                                    st.error(f"❌ Training Failed: {trained_result.get('message', 'Unknown error')}")
+                                else:
+                                    st.error("❌ Training was interrupted")
 
-                                    if hyperparameters_changed:
-                                        st.warning(
-                                            "⚠️ Hyperparameters have changed since the model was trained. "
-                                            "Please click 'Train NBEats Model' to retrain with new settings."
-                                        )
-                                        st.info(
-                                            f"Last trained with: input_chunk_length={stored_hp.get('input_chunk_length')}, "
-                                            f"output_chunk_length={stored_hp.get('output_chunk_length')}, "
-                                            f"num_blocks={stored_hp.get('num_blocks')}, "
-                                            f"num_layers={stored_hp.get('num_layers')}, "
-                                            f"layer_widths={stored_hp.get('layer_widths')}, "
-                                            f"validation_split={stored_hp.get('validation_split')}"
-                                        )
-                                    else:
-                                        st.success(
-                                            "✅ NBEats model is trained and ready for forecasting!"
-                                        )
-                                        st.info(
-                                            f"Training: {trained_result['training_weeks']} weeks | Validation: {trained_result['validation_weeks']} weeks"
-                                        )
+                            # Show if model already trained
+                            if st.session_state.get("nbeats_model_trained", False):
+                                trained_result = st.session_state["nbeats_trained_model"]
 
-                                    # Display validation metrics
-                                    if "metrics" in trained_result:
-                                        st.markdown("**Model Performance Metrics:**")
-                                        col1, col2, col3, col4 = st.columns(4)
-                                        with col1:
-                                            st.badge(
-                                                f"sMAPE: {trained_result['metrics']['smape']:.2f}%",
-                                                color="blue",
-                                            )
-                                        with col2:
-                                            st.badge(
-                                                f"MAPE: {trained_result['metrics']['mape']:.2f}%",
-                                                color="blue",
-                                            )
-                                        with col3:
-                                            st.badge(
-                                                f"RMSE: {trained_result['metrics']['rmse']:.4f}",
-                                                color="blue",
-                                            )
-                                        with col4:
-                                            st.badge(
-                                                f"MAE: {trained_result['metrics']['mae']:.4f}",
-                                                color="blue",
-                                            )
+                                # Check if hyperparameters have changed
+                                stored_hp = trained_result.get('hyperparameters', {})
+                                current_hp = {
+                                    'input_chunk_length': input_chunk_length,
+                                    'output_chunk_length': output_chunk_length,
+                                    'n_epochs': n_epochs,
+                                    'num_blocks': num_blocks,
+                                    'num_stacks': num_stacks,
+                                    'num_layers': num_layers,
+                                    'layer_widths': layer_widths,
+                                    'batch_size': batch_size,
+                                    'learning_rate': learning_rate,
+                                    'dropout': dropout,
+                                }
+                                hyperparameters_changed = stored_hp != current_hp
 
-                                    # Display Validation and Forecast Plot (only if hyperparameters haven't changed)
-                                    if not hyperparameters_changed:
-                                        st.divider()
-                                        st.markdown(
-                                            "#### Validation & Forecast Visualization"
-                                        )
-                                        with st.spinner("Generating visualization...", show_time=True):
-                                            # Get training metadata for plotting
-                                            training_metadata = st.session_state.get(
-                                                "training_metadata", {}
-                                            )
-                                            fig_val_forecast = plot_validation_and_forecast(
-                                                trained_result,
-                                                training_metadata=training_metadata,
-                                                validation_weeks=trained_result['validation_weeks'],
-                                                forecast_weeks=12,
-                                            )
-                                            if fig_val_forecast is not None:
-                                                st.plotly_chart(
-                                                    fig_val_forecast,
-                                                    width='stretch',
-                                                )
-                                            else:
-                                                st.warning(
-                                                    "Could not generate visualization"
-                                                )
+                                if hyperparameters_changed:
+                                    st.warning(
+                                        "⚠️ Hyperparameters have changed since the model was trained. "
+                                        "Please click 'Train NBEats Model' to retrain with new settings."
+                                    )
+                                else:
+                                    st.success(
+                                        "✅ NBEats model is trained and ready for forecasting!"
+                                    )
+                                    st.info(
+                                        f"Training: {trained_result['training_weeks']} weeks | Validation: 24 weeks"
+                                    )
 
-                                    # Test Forecast Button - Store forecast for use in projection chart
-                                    col1, col2 = st.columns([1, 1])
+                                # Display validation metrics
+                                if "metrics" in trained_result:
+                                    st.markdown("**Model Performance Metrics:**")
+                                    col1, col2, col3, col4 = st.columns(4)
                                     with col1:
-                                        if st.button(
-                                            "Generate Test Forecast (12 weeks)",
-                                            use_container_width=True,
-                                            type='primary',
-                                            icon=":material/add:"
-                                        ):
-                                            with st.spinner("Generating forecast...", show_time=True):
-                                                test_forecast_df = (
-                                                    forecast_nbeats_model(
-                                                        trained_result,
-                                                        forecast_weeks=12,
-                                                    )
-                                                )
-                                                if test_forecast_df is not None:
-                                                    # Store in session state for use in projection chart
-                                                    st.session_state[
-                                                        "trajectory_forecast"
-                                                    ] = test_forecast_df
-                                                    st.success(
-                                                        "✅ Forecast generated and added to trajectory chart!"
-                                                    )
-                                                    st.rerun()
-                                                else:
-                                                    st.error(
-                                                        "❌ Forecast generation failed"
-                                                    )
-                                    with col2:
-                                        if st.button(
-                                            "Clear Forecast from Chart",
-                                            use_container_width=True,
-                                            icon=":material/delete:"
-                                        ):
-                                            if (
-                                                "trajectory_forecast"
-                                                in st.session_state
-                                            ):
-                                                del st.session_state[
-                                                    "trajectory_forecast"
-                                                ]
-                                                st.success(
-                                                    "✅ Forecast cleared from trajectory chart!"
-                                                )
-                                                st.rerun()
-
-                                    # Show current forecast if available
-                                    if "trajectory_forecast" in st.session_state:
-                                        st.info(
-                                            "ℹ️ **Forecast is active** and shown in the Target Achievement Calculator chart above."
+                                        st.badge(
+                                            f"sMAPE: {trained_result['metrics']['smape']:.2f}%",
+                                            color="blue",
                                         )
-                                        with st.expander(
-                                            "View Forecast Data", expanded=False
-                                        ):
-                                            st.dataframe(
-                                                st.session_state["trajectory_forecast"],
-                                                hide_index=True,
-                                                width='stretch',
-                                            )
+                                    with col2:
+                                        st.badge(
+                                            f"MAPE: {trained_result['metrics']['mape']:.2f}%",
+                                            color="blue",
+                                        )
+                                    with col3:
+                                        st.badge(
+                                            f"RMSE: {trained_result['metrics']['rmse']:.4f}",
+                                            color="blue",
+                                        )
+                                    with col4:
+                                        st.badge(
+                                            f"MAE: {trained_result['metrics']['mae']:.4f}",
+                                            color="blue",
+                                        )
+
+                                # Display Training Forecast Plot
+                                st.divider()
+                                st.markdown("#### :material/online_prediction: Training Forecast Visualization")
+                                
+                                # Display plot from training results
+                                if 'figure' in trained_result and trained_result['figure'] is not None:
+                                    st.plotly_chart(trained_result['figure'], use_container_width=True, key="model_training_plot")
+                                else:
+                                    st.warning("Training plot not available")
+
+                                # Control buttons for forecast
+                                st.divider()
+                                col1, col2 = st.columns([1, 1])
+                                with col1:
+                                    if st.button(
+                                        "Update Forecast in Calculator",
+                                        use_container_width=True,
+                                        type='primary',
+                                        icon=":material/refresh:",
+                                        help="Refresh the forecast used in Target Achievement Calculator"
+                                    ):
+                                        # The forecast_df is already stored when training completes
+                                        if 'forecast_df' in trained_result:
+                                            st.session_state["trajectory_forecast"] = trained_result['forecast_df']
+                                            st.success("✅ Forecast updated in Target Achievement Calculator!")
+                                            st.rerun()
+                                        else:
+                                            st.error("❌ No forecast available from trained model")
+                                with col2:
+                                    if st.button(
+                                        "Clear Forecast from Calculator",
+                                        use_container_width=True,
+                                        icon=":material/delete:",
+                                        help="Remove forecast from Target Achievement Calculator chart"
+                                    ):
+                                        if "trajectory_forecast" in st.session_state:
+                                            del st.session_state["trajectory_forecast"]
+                                            st.success("✅ Forecast cleared from calculator!")
+                                            st.rerun()
+
+                                # Show current forecast status
+                                if "trajectory_forecast" in st.session_state:
+                                    st.info(
+                                        "ℹ️ **Forecast is active** and shown in the Target Achievement Calculator chart above."
+                                    )
+                                    with st.expander("View Forecast Data", expanded=False):
+                                        st.dataframe(
+                                            st.session_state["trajectory_forecast"],
+                                            hide_index=True,
+                                            use_container_width=True,
+                                        )
 
                                 # Convert TimeSeries to DataFrame for display
                                 st.divider()
@@ -1616,217 +1552,7 @@ if uploaded_files:
                                     )
                                     st.caption("Access ES Tracker")
 
-                                with st.expander(
-                                    "Training Data - TimeSeries Plots",
-                                    icon=":material/coronavirus:",
-                                    expanded=False,
-                                ):
-                                    st.markdown(
-                                        "#### :material/coronavirus: Influenza TimeSeries"
-                                    )
-                                    inf, fig = process_influenza_data()
-                                    st.pyplot(fig)
-                                    show_df = st.checkbox(
-                                        "Show df:", value=False, key="show-df3"
-                                    )
-                                    if show_df:
-                                        st.dataframe(inf, width="stretch", height=150)
-
-                                    st.markdown(
-                                        "#### :material/database: Historic Appointment Data"
-                                    )
-                                    if (
-                                        show_model_training
-                                        and "training_metadata" in st.session_state
-                                        and st.session_state.get(
-                                            "training_metadata", {}
-                                        ).get("appointments_series")
-                                        is not None
-                                    ):
-                                        # Get the historic data from metadata
-                                        training_metadata = st.session_state[
-                                            "training_metadata"
-                                        ]
-                                        appointments_series = training_metadata.get(
-                                            "appointments_series"
-                                        )
-
-                                        # Convert to DataFrame for display
-                                        hist_df = pd.DataFrame(
-                                            {
-                                                "week": appointments_series.time_index,
-                                                "appointments": appointments_series.values().flatten(),
-                                            }
-                                        )
-
-                                        # Create plot
-                                        import matplotlib.pyplot as plt
-
-                                        fig_hist, ax = plt.subplots(figsize=(16, 2))
-                                        ax.plot(
-                                            hist_df["week"],
-                                            hist_df["appointments"],
-                                            color="#a33b54",
-                                            linewidth=2,
-                                        )
-                                        ax.set_title(
-                                            "Historic Training Data: Weekly Appointments",
-                                            fontsize=14,
-                                            fontweight="bold",
-                                        )
-                                        ax.set_xlabel("Week", fontsize=12)
-                                        ax.set_ylabel("Appointments", fontsize=12)
-                                        ax.grid(True, alpha=0.3, linewidth=0.3)
-                                        plt.tight_layout()
-
-                                        st.pyplot(fig_hist)
-
-                                        show_df_hist = st.checkbox(
-                                            "Show historic data df:",
-                                            value=False,
-                                            key="show-df-hist",
-                                        )
-                                        if show_df_hist:
-                                            st.dataframe(
-                                                hist_df, width="stretch", height=150
-                                            )
-                                    else:
-                                        st.info(
-                                            "Enable 'Show Model Training' in sidebar and upload training files to view this data."
-                                        )
-
-                                    st.markdown(
-                                        "#### :material/merge: Merged Training Data"
-                                    )
-                                    if (
-                                        show_model_training
-                                        and "train_ts" in st.session_state
-                                        and st.session_state["train_ts"] is not None
-                                    ):
-                                        # Get the merged TimeSeries
-                                        train_ts_display = st.session_state["train_ts"]
-                                        training_metadata = st.session_state.get("training_metadata", {})
-
-                                        # Convert to DataFrame
-                                        merged_display_df = pd.DataFrame(
-                                            {
-                                                "week": train_ts_display.time_index,
-                                                "appointments": train_ts_display.univariate_component(
-                                                    0
-                                                )
-                                                .values()
-                                                .flatten(),
-                                                "influenza": train_ts_display.univariate_component(
-                                                    1
-                                                )
-                                                .values()
-                                                .flatten(),
-                                            }
-                                        )
-                                        
-                                        # Display Training Dataset Date Range
-                                        if training_metadata:
-                                            col1, col2, col3 = st.columns(3)
-                                            with col1:
-                                                st.metric(
-                                                    "Training Start Date",
-                                                    pd.Timestamp(training_metadata['start_date']).strftime("%d %b %Y")
-                                                )
-                                            with col2:
-                                                st.metric(
-                                                    "Training End Date",
-                                                    pd.Timestamp(training_metadata['end_date']).strftime("%d %b %Y")
-                                                )
-                                            with col3:
-                                                st.metric(
-                                                    "Total Weeks",
-                                                    training_metadata['total_weeks']
-                                                )
-
-                                        # Create dual-axis plot
-                                        fig_merged, ax1 = plt.subplots(figsize=(16, 3))
-
-                                        color1 = "#ab271f"
-                                        ax1.set_xlabel("Week", fontsize=12)
-                                        ax1.set_ylabel(
-                                            "Appointments", color=color1, fontsize=12
-                                        )
-                                        ax1.plot(
-                                            merged_display_df["week"],
-                                            merged_display_df["appointments"],
-                                            color=color1,
-                                            linewidth=2,
-                                            label="Appointments",
-                                        )
-                                        ax1.tick_params(axis="y", labelcolor=color1)
-                                        ax1.grid(True, alpha=0.3, linewidth=0.3)
-
-                                        ax2 = ax1.twinx()
-                                        color2 = "#545e6a"
-                                        ax2.set_ylabel(
-                                            "Influenza Level", color=color2, fontsize=12
-                                        )
-                                        ax2.plot(
-                                            merged_display_df["week"],
-                                            merged_display_df["influenza"],
-                                            color=color2,
-                                            linewidth=2,
-                                            linestyle="-",
-                                            label="Influenza",
-                                        )
-                                        ax2.tick_params(axis="y", labelcolor=color2)
-
-                                        plt.title(
-                                            f"Merged Training Data: Appointments & Influenza\n{len(merged_display_df)} weeks",
-                                            fontsize=14,
-                                            fontweight="bold",
-                                            pad=20,
-                                        )
-
-                                        lines1, labels1 = (
-                                            ax1.get_legend_handles_labels()
-                                        )
-                                        lines2, labels2 = (
-                                            ax2.get_legend_handles_labels()
-                                        )
-                                        ax1.legend(
-                                            lines1 + lines2,
-                                            labels1 + labels2,
-                                            loc="upper left",
-                                            fontsize=10,
-                                        )
-                                        ax1.grid(True, alpha=0.3, linewidth=0.3)
-                                        plt.tight_layout()
-                                        st.pyplot(fig_merged)
-
-                                        show_df_merged = st.checkbox(
-                                            "Show merged data df:",
-                                            value=False,
-                                            key="show-df-merged",
-                                        )
-                                        if show_df_merged:
-                                            st.dataframe(
-                                                merged_display_df,
-                                                width="stretch",
-                                                height=150,
-                                            )
-                                    else:
-                                        st.info(
-                                            "Enable 'Show Model Training' in sidebar and upload training files to view merged training data."
-                                        )
-
-                if show_dataframe:
-                    # 🅾️ Rename colums to original names before export
-                    csv = filtered_df.to_csv(index=False)
-                    st.sidebar.download_button(
-                        label="Download Filtered Data",
-                        data=csv,
-                        file_name="access_tracker_filtered_data.csv",
-                        mime="text/csv",
-                        type="secondary",
-                        icon=":material/download:",
-                        help="Use thie button to download your aggregated, filtered csv, good for filtering your training dataset before traiining.",
-                    )
+                                
 
             else:
                 st.warning(

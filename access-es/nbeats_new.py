@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from darts import TimeSeries
+from darts import TimeSeries, concatenate
 from darts.dataprocessing.transformers import Scaler
 import streamlit as st
 from notionhelper import NotionHelper
@@ -10,6 +10,7 @@ from darts.metrics import smape, mape, rmse, mae, r2_score
 from darts.utils.likelihood_models import QuantileRegression
 import matplotlib.dates as mdates
 import holidays
+import plotly.graph_objects as go
 
 
 # --- create_ts_data (kept logically the same) ---
@@ -62,8 +63,10 @@ def create_ts_data(filtered_df, h_data, inf_df=None):
     full_train.columns = ['week', 'apps']
 
     # 4. Feature Engineering: 4-Week Rolling Mean
-    full_train['apps_rolling4'] = full_train['apps'].rolling(window=4, min_periods=1).mean()
-    full_train['apps_rolling8'] = full_train['apps'].rolling(window=8, min_periods=1).mean()
+    # full_train['apps_rolling4'] = full_train['apps'].rolling(window=4, min_periods=1).mean()
+    # full_train['apps_rolling8'] = full_train['apps'].rolling(window=8, min_periods=1).mean()
+    full_train['apps_rolling4']  = full_train['apps'].ewm(alpha=0.4,  adjust=True, min_periods=1).mean()
+    full_train['apps_rolling8']  = full_train['apps'].ewm(alpha=0.15,  adjust=True, min_periods=1).mean()
 
     # 5. Feature Engineering: Weekly Working Days (The "Holiday Fix")
     start_date = full_train['week'].min()
@@ -107,16 +110,18 @@ def create_ts_data(filtered_df, h_data, inf_df=None):
 
     # Create plot with distinct colors for each series
     fig, ax = plt.subplots(figsize=(16, 4))
-    combined_ts['apps'].plot(ax=ax, label='Apps', color='#c0c0c0', alpha=0.8, linewidth=1.4)
-    combined_ts['inf'].plot(ax=ax, label='Influenza', color='#434346', alpha=0.7, linewidth=1.2)
-    combined_ts['apps_rolling4'].plot(ax=ax, label='4-Week Rolling Avg', color='#83944f', alpha=0.7, linewidth=1.2)
-    combined_ts['apps_rolling8'].plot(ax=ax, label='8-Week Rolling Avg', color='#4a6977', alpha=0.7, linewidth=1.2)
     
+    combined_ts['apps'].plot(ax=ax, label='Appointments', color='#c0c0c0', alpha=0.8, linewidth=1.2, zorder=1)
+    # Plot other series as line plots
+    combined_ts['inf'].plot(ax=ax, label='Influenza', color='#434346', alpha=0.7, linewidth=1.2, zorder=2)
+    combined_ts['apps_rolling4'].plot(ax=ax, label='alpha 0.4 ewm', color='#b7516b', alpha=0.7, linewidth=1.2, zorder=2)
+    combined_ts['apps_rolling8'].plot(ax=ax, label='alpha 0.15 ewm', color='#4a6977', alpha=0.7, linewidth=1.2, zorder=2)
+
     # Plot work_days on secondary y-axis (different scale)
     ax2 = ax.twinx()
-    combined_ts['work_days'].plot(ax=ax2, label='Work Days', color='#bf7f70', alpha=0.6, linewidth=1)
-    ax2.set_ylabel('Work Days', color='#bf7f70')
-    ax2.tick_params(axis='y', labelcolor='#bf7f70')
+    combined_ts['work_days'].plot(ax=ax2, label='Work Days', color='#ae4f4d', alpha=0.6, linewidth=1)
+    ax2.set_ylabel('Work Days', color='#ae4f4d')
+    ax2.tick_params(axis='y', labelcolor='#ae4f4d')
     ax2.set_ylim(0, 6)
     
     ax.set_title("Time Series Data with Holiday Awareness", fontsize=16, fontweight='bold')
@@ -190,101 +195,159 @@ def calculate_metrics(val_original, val_pred_original):
 
 def plot_forecast_result(full_series_unscaled, val_pred_orig, future_pred_orig, metric_score):
     """
-    Plots the probabilistic forecast with holiday awareness.
-    Returns the figure for display in Streamlit.
-
-    Args:
-        full_series_unscaled: Combined TimeSeries with apps, inf, apps_rolling, work_days
-        val_pred_orig: Validation/backtest predictions (probabilistic)
-        future_pred_orig: Future forecast predictions (probabilistic)
-        metric_score: sMAPE metric value
-
-    Returns:
-        matplotlib.figure.Figure: The plot figure
+    Plots the probabilistic forecast using Plotly for Streamlit.
     """
-    fig, ax = plt.subplots(figsize=(16, 8))
+    fig = go.Figure()
 
-    # 1. Plot Actual Apps (Gray) - full historical
-    full_series_unscaled['apps'].plot(
-        ax=ax, label='Actual Apps', color='#c0c0c0', alpha=0.6, linewidth=1
-    )
+    # 1. Actual Apps (Gray)
+    actual_df = full_series_unscaled['apps'].to_dataframe()
+    fig.add_trace(go.Scatter(
+        x=actual_df.index, y=actual_df['apps'],
+        name='Actual Apps', line=dict(color='#c0c0c0', width=2),
+        mode='lines'
+    ))
 
-    # 2. Plot 4-Week and 8-Week Rolling Averages
+    # 2. Rolling Averages
     if 'apps_rolling4' in full_series_unscaled.components:
-        full_series_unscaled['apps_rolling4'].plot(
-            ax=ax, label='4-Week Rolling Avg',
-            color='#83944f', linestyle='solid', linewidth=1, alpha=0.7
-        )
+        r4 = full_series_unscaled['apps_rolling4'].to_dataframe()
+        fig.add_trace(go.Scatter(
+            x=r4.index, y=r4['apps_rolling4'],
+            name='alpha 0.4 ewm', line=dict(color='#b7516b', width=1),
+            opacity=0.7
+        ))
     
     if 'apps_rolling8' in full_series_unscaled.components:
-        full_series_unscaled['apps_rolling8'].plot(
-            ax=ax, label='8-Week Rolling Avg',
-            color='#4a6977', linestyle='solid', linewidth=1, alpha=0.7
-        )
+        r8 = full_series_unscaled['apps_rolling8'].to_dataframe()
+        fig.add_trace(go.Scatter(
+            x=r8.index, y=r8['apps_rolling8'],
+            name='alpha 0.15 ewm', line=dict(color='#4a6977', width=1),
+            opacity=0.7
+        ))
 
-    # 3. Plot Work Days (Capacity Indicator) on Secondary Axis
-    ax2 = None
+    # 3. Work Days (Secondary Y-Axis)
     if 'work_days' in full_series_unscaled.components:
-        ax2 = ax.twinx()
-        full_series_unscaled['work_days'].plot(
-            ax=ax2, label='Work Days', color='#bf7f70', linestyle=':', alpha=0.2
-        )
-        ax2.set_ylim(0, 6)
-        ax2.set_ylabel("Working Days", color='#bf7f70', alpha=0.5)
-        ax2.tick_params(axis='y', labelcolor='#bf7f70', labelsize=8)
+        wd = full_series_unscaled['work_days'].to_dataframe()
+        fig.add_trace(go.Scatter(
+            x=wd.index, y=wd['work_days'],
+            name='Work Days', line=dict(color='#ae4f4d', width=0.5),
+            yaxis='y2', opacity=0.5
+        ))
 
-    # 4. Plot Backtest (Orange)
-    val_median = val_pred_orig.quantile(0.5)
-    val_median.plot(ax=ax, label='Backtest', color='#FF8C00', linewidth=1)
+    # 4. Backtest & Confidence Interval (Orange)
+    val_median = val_pred_orig.quantile(0.5).to_series()
+    val_p10 = val_pred_orig.quantile(0.1).to_series()
+    val_p90 = val_pred_orig.quantile(0.9).to_series()
 
-    # 5. Plot Future Forecast (Blue)
-    future_median = future_pred_orig.quantile(0.5)
-    future_median.plot(ax=ax, label='12-Week Forecast', color='#1f77b4', linewidth=2.5)
+    fig.add_trace(go.Scatter(
+        x=val_p10.index.tolist() + val_p90.index.tolist()[::-1],
+        y=val_p10.tolist() + val_p90.tolist()[::-1],
+        fill='toself', fillcolor='rgba(255, 140, 0, 0.15)',
+        line=dict(color='rgba(255,140,0,0)'), name='Backtest CI', showlegend=False
+    ))
+    fig.add_trace(go.Scatter(
+        x=val_median.index, y=val_median,
+        name='Backtest', line=dict(color='#FF8C00', width=1.5)
+    ))
 
-    # 6. Add uncertainty bands as shaded area
-    val_p10 = val_pred_orig.quantile(0.1)
-    val_p90 = val_pred_orig.quantile(0.9)
-    ax.fill_between(
-        list(val_p10.time_index), val_p10.values().flatten(), val_p90.values().flatten(),
-        color='#FF8C00', alpha=0.15
+    # 5. 12-Week Forecast & Confidence Interval (Blue)
+    fut_median = future_pred_orig.quantile(0.5).to_series()
+    fut_p10 = future_pred_orig.quantile(0.1).to_series()
+    fut_p90 = future_pred_orig.quantile(0.9).to_series()
+
+    fig.add_trace(go.Scatter(
+        x=fut_p10.index.tolist() + fut_p90.index.tolist()[::-1],
+        y=fut_p10.tolist() + fut_p90.tolist()[::-1],
+        fill='toself', fillcolor='rgba(31, 119, 180, 0.15)',
+        line=dict(color='rgba(31,119,180,0)'), name='Forecast CI', showlegend=False
+    ))
+    fig.add_trace(go.Scatter(
+        x=fut_median.index, y=fut_median,
+        name='12-Week Forecast', line=dict(color='#1f77b4', width=2.5)
+    ))
+
+    # 6. Layout, Grid, and Titles
+    score_text = f"{float(metric_score):.2f}%" if not pd.isna(metric_score) else "N/A"
+    
+    fig.update_layout(
+        title=f"<b>Probabilistic N-BEATS: Holiday Aware Model</b><br>Final sMAPE: {score_text}",
+        template="plotly_white",
+        hovermode="x unified",
+        xaxis=dict(
+            range=[pd.Timestamp('2025-01-01'), pd.Timestamp.now() + pd.DateOffset(weeks=12)],
+            showgrid=True, gridwidth=0.3, gridcolor='rgba(0,0,0,0.1)', # Vertical Grid
+            zeroline=False
+        ),
+        yaxis=dict(
+            title="Apps",
+            showgrid=True, gridwidth=0.3, gridcolor='rgba(0,0,0,0.1)', # Horizontal Grid
+        ),
+        yaxis2=dict(
+            title="Working Days",
+            overlaying='y', side='right', range=[0, 6],
+            showgrid=False
+        ),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        margin=dict(l=50, r=50, t=100, b=50),
+        height=600
     )
 
-    future_p10 = future_pred_orig.quantile(0.1)
-    future_p90 = future_pred_orig.quantile(0.9)
-    ax.fill_between(
-        list(future_p10.time_index), future_p10.values().flatten(), future_p90.values().flatten(),
-        color='#1f77b4', alpha=0.15
-    )
-
-    # Add vertical line at forecast start
+    # Vertical Forecast Start Line
     if len(future_pred_orig) > 0:
-        ax.axvline(
-            x=future_median.start_time(),
-            color='gray', linestyle='--', alpha=0.7, label='Forecast Start'
-        )
-
-    # Clean up the sMAPE display
-    try:
-        if pd.isna(metric_score):
-            score_text = "Calculating..."
-        else:
-            score_text = f"{float(metric_score):.2f}%"
-    except Exception:
-        score_text = "N/A"
-
-    ax.set_title(
-        f"Probabilistic N-BEATS: Holiday Aware Model\nFinal sMAPE: {score_text}",
-        fontsize=16, fontweight='bold'
-    )
-
-    ax.legend(loc='upper left')
-    ax.grid(True, which='both', alpha=0.1)
-    plt.tight_layout()
+        fig.add_vline(x=fut_median.index[0], line_width=1.5, line_dash="dash", line_color="gray")
 
     return fig
 
 
 # --- Model Training & Forecast ---
+
+def run_historical_forecast(
+    model,
+    series_scaled,
+    val,
+    target_scaler,
+    forecast_horizon=7,
+    stride=7
+):
+    """
+    Generate historical forecasts (backtesting) using a sliding window approach.
+    
+    Args:
+        model: Trained NBEATSModel
+        series_scaled: Full scaled time series
+        val: Validation portion of the time series
+        target_scaler: Scaler for inverse transforming predictions
+        forecast_horizon: Number of steps to forecast at each point (default: 7 days/1 week)
+        stride: Number of steps to move forward between forecasts (default: 7 days/1 week)
+    
+    Returns:
+        TimeSeries: Concatenated historical forecasts (inverse transformed)
+    """
+    from darts import concatenate
+    
+    print(f"⏳ Running historical forecasts with horizon={forecast_horizon}, stride={stride}")
+    
+    # Generate rolling forecasts
+    pred_series = model.historical_forecasts(
+        series_scaled,
+        start=val.start_time(),
+        forecast_horizon=forecast_horizon,
+        stride=stride,
+        last_points_only=False,
+        retrain=False,
+        verbose=True,
+    )
+    
+    # Concatenate all forecast segments
+    pred_series_concat = concatenate(pred_series)
+    
+    # Inverse transform to original scale
+    pred_series_original = target_scaler.inverse_transform(pred_series_concat)
+    
+    print(f"✅ Historical forecast complete. Generated {len(pred_series)} forecast segments")
+    print(f"📊 Total forecast length: {len(pred_series_original)} time steps")
+    
+    return pred_series_original
+
 
 def run_nbeats_forecast(
     train_scaled,
@@ -316,11 +379,13 @@ def run_nbeats_forecast(
         input_chunk_length=user_params['input_chunk_length'],
         output_chunk_length=user_params['output_chunk_length'],
         generic_architecture=user_params['generic_architecture'],
+        num_stacks=user_params.get('num_stacks', 30),
         num_blocks=user_params['num_blocks'],
         num_layers=user_params['num_layers'],
-        layer_widths=user_params['layer_widths'],  # can be int or list with len==num_stacks
+        layer_widths=user_params['layer_widths'],
         n_epochs=user_params['n_epochs'],
         batch_size=user_params['batch_size'],
+        dropout=user_params.get('dropout', 0.1),
         optimizer_kwargs={'lr': user_params.get('learning_rate', 0.0005)},
         likelihood=QuantileRegression(quantiles=[0.1, 0.5, 0.9]),
         nr_epochs_val_period=1,
@@ -376,12 +441,181 @@ def run_nbeats_forecast(
     return pred_future_orig, metrics_results, model, fig
 
 
+def train_model_for_app(
+    combined_ts,
+    input_chunk_length=52,
+    output_chunk_length=12,
+    n_epochs=100,
+    num_blocks=4,
+    num_stacks=30,
+    num_layers=4,
+    layer_widths=512,
+    batch_size=32,
+    learning_rate=0.0005,
+    dropout=0.1,
+):
+    """
+    Train N-BEATS model for Streamlit app with user-specified hyperparameters.
+    Validation is fixed at 24 weeks.
+    
+    Args:
+        combined_ts: TimeSeries object with training data
+        input_chunk_length: Length of input sequence
+        output_chunk_length: Length of output sequence
+        n_epochs: Number of training epochs
+        num_blocks: Number of blocks in the model
+        num_stacks: Number of stacks in the model
+        num_layers: Number of layers per block
+        layer_widths: Width of each layer
+        batch_size: Training batch size
+        learning_rate: Learning rate for optimizer
+        dropout: Dropout rate for regularization
+    
+    Returns:
+        dict: Training results with model, scalers, metrics, and metadata
+    """
+    try:
+        # Fixed validation size: 24 weeks
+        total_weeks = len(combined_ts)
+        test_size = 24
+        
+        # Scale and split data
+        train_scaled, val_scaled, series_scaled, target_scaler, cov_scaler = scale_and_split_ts(
+            combined_ts,
+            test_size=test_size
+        )
+        
+        # Define parameters
+        user_params = {
+            "input_chunk_length": input_chunk_length,
+            "output_chunk_length": output_chunk_length,
+            "generic_architecture": False,
+            "num_stacks": num_stacks,
+            "num_blocks": num_blocks,
+            "num_layers": num_layers,
+            "layer_widths": layer_widths,
+            "n_epochs": n_epochs,
+            "batch_size": batch_size,
+            "learning_rate": learning_rate,
+            "dropout": dropout
+        }
+        
+        # Train model
+        forecast_series, metrics_results, trained_model, fig = run_nbeats_forecast(
+            train_scaled=train_scaled,
+            val_scaled=val_scaled,
+            series_scaled=series_scaled,
+            target_scaler=target_scaler,
+            cov_scaler=cov_scaler,
+            user_params=user_params,
+            combined_ts=combined_ts,
+            future_weeks=12
+        )
+        
+        # Extract metrics
+        metrics = {
+            'smape': metrics_results["Value"][0],
+            'mape': metrics_results["Value"][1],
+            'rmse': metrics_results["Value"][2],
+            'mae': metrics_results["Value"][3],
+            'r2_score': metrics_results["Value"][4],
+        }
+        
+        # Convert forecast_series to DataFrame for app use
+        forecast_median = forecast_series.quantile(0.5)
+        forecast_df = pd.DataFrame({
+            'week': forecast_median.time_index,
+            'forecasted_appointments': forecast_median.univariate_values()
+        })
+        
+        return {
+            'success': True,
+            'model': trained_model,
+            'target_scaler': target_scaler,
+            'cov_scaler': cov_scaler,
+            'train_scaled': train_scaled,
+            'val_scaled': val_scaled,
+            'series_scaled': series_scaled,
+            'combined_ts': combined_ts,
+            'metrics': metrics,
+            'metrics_df': metrics_results,
+            'training_weeks': len(train_scaled),
+            'validation_weeks': len(val_scaled),
+            'total_weeks': total_weeks,
+            'figure': fig,
+            'forecast_df': forecast_df,
+            'forecast_series': forecast_series,
+            'message': f'Model trained successfully with {len(train_scaled)} training weeks'
+        }
+        
+    except Exception as e:
+        return {
+            'success': False,
+            'message': f'Training failed: {str(e)}',
+            'error': str(e)
+        }
+
+def find_best_nbeats(train_series, val_series, torch_kwargs=None):
+    """
+    Performs grid search for NBEATSModel hyperparameters.
+    
+    Args:
+        train_series (TimeSeries): The scaled training series.
+        val_series (TimeSeries): The scaled validation series.
+        torch_kwargs (dict, optional): Additional lightning/torch arguments.
+        
+    Returns:
+        best_model, best_params, best_score
+    """
+    
+    # Define the parameter grid
+    parameters = {
+        "input_chunk_length": [26, 52, 64, 104],
+        "output_chunk_length": [6, 12],
+        "generic_architecture": [False, True],
+        "num_blocks": [2, 3, 4, 5],
+        "num_layers": [3, 4],
+        "num_stacks": [30, 50],
+        "layer_widths": [256, 512, 1024],
+        "n_epochs": [100, 150],
+        "nr_epochs_val_period": [1],
+        "batch_size": [64, 800],
+        "random_state": [42],
+        "force_reset": [True],
+        "save_checkpoints": [False],
+    }
+
+    # Integrate torch kwargs if provided (ensuring each value is a list for gridsearch)
+    if torch_kwargs:
+        for k, v in torch_kwargs.items():
+            parameters[k] = [v]
+
+    # Run the gridsearch
+    # n_jobs=-1 is great for CPU, but if using GPU, 1 is often safer/faster
+    best_model, best_params, best_score = NBEATSModel.gridsearch(
+        parameters=parameters,
+        series=train_series,
+        val_series=val_series,
+        metric=smape,
+        n_jobs=1, 
+        verbose=True  # Switched to True to track progress of long runs
+    )
+
+    print("-" * 30)
+    print(f"Grid Search Complete")
+    print(f"Best sMAPE: {best_score:.4f}")
+    print(f"Best Params: {best_params}")
+    print("-" * 30)
+
+    return best_model, best_params, best_score
+
+
 def full_predict():
     print("🚧 Starting Script")
 
     # 1. Load data from files (for standalone testing)
     filtered_df = pd.read_csv('/Users/janduplessis/Downloads/filtered_appointments.csv')
-    h_data = pd.read_csv('/Users/janduplessis/Downloads/Historic_filtered_appointments.csv')
+    h_data = pd.read_csv('/Users/janduplessis/Library/CloudStorage/OneDrive-NHS/python-data/ACCESS BI/FILTERED_TRAIN_SET_startApril21.csv')
 
     # 2. Build time series with holiday-aware features
     combined_ts, _ = create_ts_data(filtered_df, h_data)
@@ -420,4 +654,19 @@ def full_predict():
     plt.show()
 
 if __name__ == "__main__":
-    full_predict()
+    print("🚧 Starting Script")
+
+    # 1. Load data from files (for standalone testing)
+    filtered_df = pd.read_csv('/Users/janduplessis/Downloads/filtered_appointments.csv')
+    h_data = pd.read_csv('/Users/janduplessis/Library/CloudStorage/OneDrive-NHS/python-data/ACCESS BI/FILTERED_TRAIN_SET_startApril21.csv')
+
+    # 2. Build time series with holiday-aware features
+    combined_ts, _ = create_ts_data(filtered_df, h_data)
+
+    # 2. Scale and Split
+    train_scaled, val_scaled, series_scaled, target_scaler, cov_scaler = scale_and_split_ts(
+        combined_ts,
+        test_size=24
+    )
+    
+    best_model, best_params, best_score = find_best_nbeats(train_scaled, val_scaled, torch_kwargs={"pl_trainer_kwargs": {"accelerator": "cpu"}})

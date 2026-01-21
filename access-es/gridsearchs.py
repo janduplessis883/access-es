@@ -107,15 +107,15 @@ def find_best_nbeats(train_series, val_series, torch_kwargs=None):
     
     # Define the parameter grid
     parameters = {
-        "input_chunk_length": [26, 52, 64],
-        "output_chunk_length": [6, 12],
-        "generic_architecture": [False, True],
-        "num_blocks": [2, 3, 4],
+        "input_chunk_length": [104],
+        "output_chunk_length": [12],
+        "generic_architecture": [False],
+        "num_blocks": [5],
         "num_layers": [4],
-        "layer_widths": [256, 512],
-        "n_epochs": [50, 100],
+        "layer_widths": [512],
+        "n_epochs": [100],
         "nr_epochs_val_period": [1],
-        "batch_size": [64, 800],
+        "batch_size": [64],
         "random_state": [42],
         "force_reset": [True],
         "save_checkpoints": [True]
